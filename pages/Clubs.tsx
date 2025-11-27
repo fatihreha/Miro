@@ -954,5 +954,6 @@ export const Clubs: React.FC = () => {
                     </div>
                 )}
             </div>
-            );
+        </div>
+    );
 };

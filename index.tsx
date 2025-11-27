@@ -10,11 +10,31 @@ Sentry.init({
   // Environment (development/production)
   environment: (import.meta as any).env?.MODE || 'development',
 
+  // Integrations (Updated to new API)
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration()
+  ],
+
   // Performance Monitoring
-  tracesSampleRate: 0.2, // 20% of transactions
+  tracesSampleRate: 0.2, // 20% of transactions (adjust for production)
+
+  // Distributed tracing
+  tracePropagationTargets: [
+    "localhost",
+    /^https:\/\/.*\.supabase\.co/,
+    /^https:\/\/ojjbbtattxlwwjfrwugy\.supabase\.co/
+  ],
+
+  // Session Replay
+  replaysSessionSampleRate: 0.1, // 10% of sessions
+  replaysOnErrorSampleRate: 1.0, // 100% when errors occur
 
   // PII (Personally Identifiable Information)
   sendDefaultPii: true,
+
+  // Enable logs
+  enableLogs: true,
 
   // Don't send errors in development
   beforeSend(event, hint) {

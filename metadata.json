@@ -1,0 +1,9 @@
+{
+  "name": "SportPulse",
+  "description": "A premium cross-platform sport dating application featuring Liquid Glass design and AI-powered matchmaking.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

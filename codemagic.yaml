@@ -1,0 +1,132 @@
+app_name: sportpulse
+workflows:
+  ios-workflow:
+    name: iOS Production Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    integrations:
+      app_store_connect: codemagic
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.sportpulse.app
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.sportpulse.app"
+        APP_STORE_APPLE_ID: 1234567890 # Replace with your Apple ID
+      node: v18
+      npm: latest
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+      - name: Install CocoaPods
+        script: |
+          cd ios/App && pod install
+      - name: Build iOS
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com # Replace with your email
+        notify:
+          success: true
+          failure: true
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false # Set true for production release
+
+  android-workflow:
+    name: Android Production Build
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      android_signing:
+        - sportpulse_keystore
+      groups:
+        - google_credentials
+      vars:
+        PACKAGE_NAME: "com.sportpulse.app"
+      node: v18
+      npm: latest
+      java: 17
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+      - name: Build Android
+        script: |
+          cd android
+          ./gradlew bundleRelease
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com # Replace with your email
+        notify:
+          success: true
+          failure: true
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal # internal, alpha, beta, production
+        submit_as_draft: true
+
+  test-workflow:
+    name: Run Tests
+    max_build_duration: 30
+    instance_type: linux
+    environment:
+      node: v18
+      npm: latest
+    triggering:
+      events:
+        - pull_request
+      branch_patterns:
+        - pattern: '*'
+          include: true
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+      - name: Run linter
+        script: |
+          npm run lint
+      - name: Run type check
+        script: |
+          npm run type-check
+      - name: Run tests
+        script: |
+          npm test -- --coverage
+      - name: Upload coverage
+        script: |
+          bash <(curl -s https://codecov.io/bash)
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          failure: true

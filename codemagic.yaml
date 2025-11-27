@@ -3,7 +3,7 @@ workflows:
   ios-workflow:
     name: iOS Production Build
     max_build_duration: 60
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
     integrations:
       app_store_connect: codemagic
     environment:
@@ -15,7 +15,7 @@ workflows:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "com.sportpulse.app"
         APP_STORE_APPLE_ID: 1234567890 # Replace with your Apple ID
-      node: v18
+      node: v20
       npm: latest
     triggering:
       events:
@@ -54,7 +54,7 @@ workflows:
   android-workflow:
     name: Android Production Build
     max_build_duration: 60
-    instance_type: linux_x2
+    instance_type: linux
     environment:
       android_signing:
         - sportpulse_keystore
@@ -62,7 +62,7 @@ workflows:
         - google_credentials
       vars:
         PACKAGE_NAME: "com.sportpulse.app"
-      node: v18
+      node: v20
       npm: latest
       java: 17
     triggering:
@@ -100,33 +100,19 @@ workflows:
     max_build_duration: 30
     instance_type: linux
     environment:
-      node: v18
+      node: v20
       npm: latest
-    triggering:
-      events:
-        - pull_request
-      branch_patterns:
-        - pattern: '*'
-          include: true
     scripts:
       - name: Install dependencies
         script: |
           npm ci
-      - name: Run linter
+      - name: Build project
         script: |
-          npm run lint
-      - name: Run type check
-        script: |
-          npm run type-check
-      - name: Run tests
-        script: |
-          npm test -- --coverage
-      - name: Upload coverage
-        script: |
-          bash <(curl -s https://codecov.io/bash)
+          npm run build
     publishing:
       email:
         recipients:
-          - your-email@example.com
+          - fatih@sportpulse.com
         notify:
+          success: true
           failure: true

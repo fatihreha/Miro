@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { z } from 'zod';
 import { GlassCard, GlassButton, GlassInput, GlassSelectable } from '../components/ui/Glass';
 import { Users, MapPin, Search, Plus, Calendar, CheckCircle2, ShieldCheck, Crown, ArrowRight, Zap, Lock, Clock, Star, X, Image as ImageIcon, AlignLeft, Sparkles, Send, Bot, Timer } from 'lucide-react';
 import { SportType, SportEvent, Club } from '../types';
@@ -11,6 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLayout } from '../context/LayoutContext';
 import { chatWithAICoach } from '../services/geminiService';
 import { VerificationModal } from '../components/modals/VerificationModal';
+import { clubSchema } from '../utils/validation';
 import { clubService } from '../services/clubService';
 import { realtimeManager } from '../services/realtimeManager';
 
@@ -267,43 +269,55 @@ export const Clubs: React.FC = () => {
     };
 
     const handleCreateClub = async () => {
-        if (!newClub.name || !newClub.location) {
-            hapticFeedback.error();
-            return;
-        }
-
-        const createdClub: Club = {
-            id: Date.now().toString(),
-            ownerId: user?.id || 'me',
-            name: newClub.name,
-            sport: newClub.sport,
-            location: newClub.location,
-            description: newClub.description || 'A new community for sports enthusiasts.',
-            members: 1,
-            image: 'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=800&auto=format&fit=crop&q=60', // Default image
-            isMember: true,
-            membershipStatus: 'member'
-        };
-
-        // Save to Supabase
+        // ✅ SECURITY: Validate input before processing
         try {
-            await clubService.createClub({
+            const validated = clubSchema.parse({
                 name: newClub.name,
                 sport: newClub.sport,
                 location: newClub.location,
-                description: newClub.description || 'A new community for sports enthusiasts.',
-                ownerId: user?.id || 'me'
+                description: newClub.description || 'A new community for sports enthusiasts.'
             });
-        } catch (e) {
-            console.error('Error creating club in Supabase:', e);
+
+            const createdClub: Club = {
+                id: Date.now().toString(),
+                ownerId: user?.id || 'me',
+                name: validated.name,
+                sport: validated.sport,
+                location: validated.location,
+                description: validated.description,
+                members: 1,
+                image: 'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=800&auto=format&fit=crop&q=60',
+                isMember: true,
+                membershipStatus: 'member'
+            };
+
+            // Save to Supabase
+            try {
+                await clubService.createClub({
+                    name: validated.name,
+                    sport: validated.sport,
+                    location: validated.location,
+                    description: validated.description,
+                    ownerId: user?.id || 'me'
+                });
+            } catch (e) {
+                console.error('Error creating club in Supabase:', e);
+            }
+
+            setAllClubs(prev => [createdClub, ...prev]);
+            setShowCreateForm(false);
+            setNewClub({ name: '', sport: SportType.RUNNING, location: '', description: '' });
+
+            hapticFeedback.success();
+            notificationService.showNotification("Club Created", { body: `${validated.name} is now live!` });
+        } catch (error) {
+            // Show validation error to user
+            if (error instanceof z.ZodError) {
+                const firstError = error.errors[0];
+                alert(firstError.message); // Replace with proper toast/notification
+                hapticFeedback.error();
+            }
         }
-
-        setAllClubs(prev => [createdClub, ...prev]);
-        setShowCreateForm(false);
-        setNewClub({ name: '', sport: SportType.RUNNING, location: '', description: '' });
-
-        hapticFeedback.success();
-        notificationService.showNotification("Club Created", { body: `${newClub.name} is now live!` });
     };
 
     // Event Creation Logic

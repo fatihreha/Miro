@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { emailSchema, passwordSchema } from '../utils/validation';
 
 // Supabase Configuration
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
@@ -27,6 +28,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 export const authHelpers = {
   // Sign up with email
   async signUp(email: string, password: string, userData: any) {
+    // ✅ SECURITY: Validate email and password before signup
+    emailSchema.parse(email);
+    passwordSchema.parse(password);
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,

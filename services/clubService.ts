@@ -93,6 +93,7 @@ export class ClubService {
         description: string;
         sport: string;
         ownerId: string;
+        location?: string;
         isPrivate?: boolean;
         avatarUrl?: string;
     }): Promise<any | null> {
@@ -104,6 +105,7 @@ export class ClubService {
                     description: clubData.description,
                     sport: clubData.sport,
                     owner_id: clubData.ownerId,
+                    location: clubData.location,
                     is_private: clubData.isPrivate || false,
                     avatar_url: clubData.avatarUrl,
                     member_count: 1

@@ -1,8 +1,8 @@
 import CryptoJS from 'crypto-js';
 
-const SECRET_KEY = import.meta.env.VITE_ENCRYPTION_KEY || '';
+const SECRET_KEY = (import.meta as any).env?.VITE_ENCRYPTION_KEY || '';
 
-if (!SECRET_KEY && import.meta.env.MODE === 'production') {
+if (!SECRET_KEY && (import.meta as any).env?.MODE === 'production') {
     console.error('⚠️ ENCRYPTION_KEY not set! Sensitive data will not be encrypted.');
 }
 

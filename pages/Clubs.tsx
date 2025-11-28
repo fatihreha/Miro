@@ -266,7 +266,7 @@ export const Clubs: React.FC = () => {
         setTimeout(() => setShowCreateForm(true), 500);
     };
 
-    const handleCreateClub = () => {
+    const handleCreateClub = async () => {
         if (!newClub.name || !newClub.location) {
             hapticFeedback.error();
             return;

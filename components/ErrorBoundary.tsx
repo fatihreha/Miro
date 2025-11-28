@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { Sentry } from '../services/sentryService';
+import * as Sentry from '@sentry/react';
 import { GlassCard, GlassButton } from './ui/Glass';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 

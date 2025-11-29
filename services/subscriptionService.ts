@@ -1,5 +1,6 @@
 
 import { SubscriptionPackage } from '../types';
+import { supabase } from './supabase';
 
 // Mocking a RevenueCat-like service
 const MOCK_PACKAGES: SubscriptionPackage[] = [
@@ -34,31 +35,54 @@ class SubscriptionService {
     return MOCK_PACKAGES;
   }
 
-  async purchasePackage(packageIdentifier: string): Promise<{ success: boolean, customerInfo: any }> {
+  async purchasePackage(packageIdentifier: string, userId: string): Promise<{ success: boolean, customerInfo: any }> {
     // Simulate network latency and processing
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Simulate success
-    this.isPremium = true;
-    localStorage.setItem('sportpulse_premium_status', 'true');
-    
-    return {
-      success: true,
-      customerInfo: {
-        entitlements: {
-          active: {
-            'pro_access': { expiresDate: null }
+
+    // Update Supabase user
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ is_premium: true })
+        .eq('id', userId);
+
+      if (error) throw error;
+
+      this.isPremium = true;
+      return {
+        success: true,
+        customerInfo: {
+          entitlements: {
+            active: {
+              'pro_access': { expiresDate: null }
+            }
           }
         }
-      }
-    };
+      };
+    } catch (e) {
+      console.error('Purchase error:', e);
+      return { success: false, customerInfo: null };
+    }
   }
 
-  async restorePurchases(): Promise<{ success: boolean, restored: boolean }> {
-     await new Promise(resolve => setTimeout(resolve, 1500));
-     // Mock logic: if they "bought" it before in this session simulation
-     const status = localStorage.getItem('sportpulse_premium_status') === 'true';
-     return { success: true, restored: status };
+  async restorePurchases(userId: string): Promise<{ success: boolean, restored: boolean }> {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Check Supabase
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('is_premium')
+        .eq('id', userId)
+        .single();
+
+      if (error) throw error;
+
+      return { success: true, restored: data?.is_premium || false };
+    } catch (e) {
+      console.error('Restore error:', e);
+      return { success: false, restored: false };
+    }
   }
 
   checkSubscriptionStatus(): boolean {

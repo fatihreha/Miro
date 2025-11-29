@@ -16,23 +16,11 @@ export const Gamification: React.FC = () => {
   const isLight = theme === 'light';
 
   // State for real data
-  const [userXP, setUserXP] = useState(2450);
-  const [currentLevel, setCurrentLevel] = useState(12);
-  const [nextLevelXP, setNextLevelXP] = useState(3000);
-  const [badges, setBadges] = useState([
-    { id: '1', name: 'Early Bird', icon: '🌅', description: 'Joined 5 morning events', unlocked: true },
-    { id: '2', name: 'Socialite', icon: '🗣️', description: 'Sent 100 messages', unlocked: true },
-    { id: '3', name: 'Club Founder', icon: '🏰', description: 'Created your first club', unlocked: false },
-    { id: '4', name: 'Marathoner', icon: '🏃', description: 'Logged 42km total', unlocked: true },
-    { id: '5', name: 'Yogi Master', icon: '🧘', description: 'Attended 10 Yoga sessions', unlocked: false },
-    { id: '6', name: 'Streak King', icon: '🔥', description: '7 day login streak', unlocked: true },
-  ]);
-  const [leaderboard, setLeaderboard] = useState([
-    { id: '1', name: 'Jessica M.', xp: 15420, avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&auto=format&fit=crop&q=60', rank: 1 },
-    { id: '2', name: 'Mike T.', xp: 12100, avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=60', rank: 2 },
-    { id: '3', name: 'Sarah C.', xp: 9850, avatar: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=200&auto=format&fit=crop&q=60', rank: 3 },
-    { id: 'me', name: 'You', xp: 2450, avatar: user?.avatarUrl, rank: 42 },
-  ]);
+  const [userXP, setUserXP] = useState(0);
+  const [currentLevel, setCurrentLevel] = useState(1);
+  const [nextLevelXP, setNextLevelXP] = useState(1000);
+  const [badges, setBadges] = useState<any[]>([]);
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
 
   // Load real data from Supabase
   useEffect(() => {

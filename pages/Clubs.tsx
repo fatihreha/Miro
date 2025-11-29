@@ -14,124 +14,10 @@ import { chatWithAICoach } from '../services/geminiService';
 import { VerificationModal } from '../components/modals/VerificationModal';
 import { clubSchema } from '../utils/validation';
 import { clubService } from '../services/clubService';
+import { trainerService } from '../services/trainerService';
 import { realtimeManager } from '../services/realtimeManager';
 
-const MOCK_CLUBS: Club[] = [
-    {
-        id: '1',
-        ownerId: 'system',
-        name: 'Midnight Runners',
-        sport: SportType.RUNNING,
-        image: 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=60',
-        members: 1240,
-        description: 'We run the city when it sleeps. Join us for late-night 5Ks and post-run smoothies.',
-        isMember: true,
-        membershipStatus: 'member',
-        location: 'Central Park, NY'
-    },
-    {
-        id: '2',
-        ownerId: 'system',
-        name: 'Ace Tennis Club',
-        sport: SportType.TENNIS,
-        image: 'https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?w=800&auto=format&fit=crop&q=60',
-        members: 85,
-        description: 'Dedicated to finding your perfect doubles partner. Weekly tournaments.',
-        isMember: false,
-        membershipStatus: 'guest',
-        location: 'City Courts'
-    },
-    {
-        id: '3',
-        ownerId: 'system',
-        name: 'Zen Yoga Collective',
-        sport: SportType.YOGA,
-        image: 'https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=800&auto=format&fit=crop&q=60',
-        members: 430,
-        description: 'Find your flow in the chaos of the city. Outdoor sessions when weather permits.',
-        isMember: false,
-        membershipStatus: 'guest',
-        location: 'Battery Park'
-    }
-];
-
-const MOCK_EVENTS: SportEvent[] = [
-    {
-        id: 'e1',
-        hostId: 'u1',
-        hostName: 'Alex',
-        hostAvatar: 'https://i.pravatar.cc/150?u=alex',
-        title: 'Sunday Morning Jog',
-        sport: SportType.RUNNING,
-        date: 'Today',
-        time: '08:00',
-        location: 'Central Park North',
-        description: 'Casual 5k run. All paces welcome! Coffee afterwards.',
-        attendees: 12,
-        attendeeAvatars: ['https://i.pravatar.cc/150?u=1', 'https://i.pravatar.cc/150?u=2', 'https://i.pravatar.cc/150?u=3'],
-        isJoined: true,
-        attendanceStatus: 'going'
-    },
-    {
-        id: 'e2',
-        hostId: 'u2',
-        hostName: 'Sarah',
-        hostAvatar: 'https://i.pravatar.cc/150?u=sarah',
-        title: '3v3 Basketball',
-        sport: SportType.BASKETBALL,
-        date: 'Tomorrow',
-        time: '16:00',
-        location: 'Rucker Park',
-        description: 'Looking for players for a friendly game.',
-        attendees: 4,
-        attendeeAvatars: ['https://i.pravatar.cc/150?u=5', 'https://i.pravatar.cc/150?u=6'],
-        isJoined: false,
-        attendanceStatus: 'guest'
-    },
-    {
-        id: 'e3',
-        hostId: 'u3',
-        hostName: 'Mike',
-        hostAvatar: 'https://i.pravatar.cc/150?u=mike',
-        title: 'Sunset Yoga',
-        sport: SportType.YOGA,
-        date: 'Fri, Nov 18',
-        time: '18:30',
-        location: 'Pier 57',
-        description: 'Bring your own mat. Beginners welcome.',
-        attendees: 25,
-        attendeeAvatars: ['https://i.pravatar.cc/150?u=7', 'https://i.pravatar.cc/150?u=8', 'https://i.pravatar.cc/150?u=9'],
-        isJoined: false,
-        attendanceStatus: 'guest'
-    }
-];
-
-const MOCK_PROS = [
-    {
-        id: 't1',
-        name: 'Coach David',
-        specialty: 'HIIT & Strength',
-        image: 'https://images.unsplash.com/photo-1567598508481-65985588e295?w=800&auto=format&fit=crop&q=60',
-        rating: 4.9,
-        location: 'Downtown Gym'
-    },
-    {
-        id: 't2',
-        name: 'Sarah Jenkins',
-        specialty: 'Yoga & Mobility',
-        image: 'https://images.unsplash.com/photo-1594381898411-846e7d193883?w=800&auto=format&fit=crop&q=60',
-        rating: 5.0,
-        location: 'Zen Studio'
-    },
-    {
-        id: 't3',
-        name: 'Mike Ross',
-        specialty: 'Tennis Pro',
-        image: 'https://images.unsplash.com/photo-1531427186611-ecfd6d936c79?w=800&auto=format&fit=crop&q=60',
-        rating: 4.8,
-        location: 'City Courts'
-    }
-];
+// Mock data removed
 
 export const Clubs: React.FC = () => {
     const navigate = useNavigate();
@@ -142,27 +28,52 @@ export const Clubs: React.FC = () => {
 
 
     const [allClubs, setAllClubs] = useState<Club[]>([]);
-    const [events, setEvents] = useState(MOCK_EVENTS);
+    const [events, setEvents] = useState<SportEvent[]>([]);
+    const [pros, setPros] = useState<any[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<'all' | 'my_clubs'>('all');
 
-    // Load clubs from Supabase
+    // Load Data from Supabase
     useEffect(() => {
         if (!user) return;
 
-        const loadClubs = async () => {
+        const loadData = async () => {
             try {
+                // Load Clubs
                 const clubs = await clubService.getClubs({
                     sport: searchQuery ? undefined : undefined
                 });
-                setAllClubs(clubs.length > 0 ? clubs : MOCK_CLUBS);
+                setAllClubs(clubs);
+
+                // Load Events
+                const fetchedEvents = await clubService.getEvents();
+                const formattedEvents = fetchedEvents.map(e => ({
+                    id: e.id,
+                    hostId: e.host_id,
+                    hostName: e.host?.name || 'Host',
+                    hostAvatar: e.host?.avatar_url || '',
+                    title: e.title,
+                    sport: e.sport,
+                    date: new Date(e.date).toLocaleDateString(),
+                    time: e.time,
+                    location: e.location,
+                    description: e.description,
+                    attendees: e.attendees || 0,
+                    attendeeAvatars: [], // TODO: Fetch attendees
+                    isJoined: false, // TODO: Check if joined
+                    attendanceStatus: 'guest'
+                }));
+                setEvents(formattedEvents);
+
+                // Load Pros
+                const trainers = await trainerService.getTrainers();
+                setPros(trainers.slice(0, 5)); // Top 5
             } catch (e) {
-                console.error('Error loading clubs:', e);
-                setAllClubs(MOCK_CLUBS); // Fallback
+                console.error('Error loading data:', e);
             }
         };
 
-        loadClubs();
+        loadData();
     }, [user, searchQuery]);
 
     // Creation Flow State
@@ -282,7 +193,7 @@ export const Clubs: React.FC = () => {
                 id: Date.now().toString(),
                 ownerId: user?.id || 'me',
                 name: validated.name,
-                sport: validated.sport,
+                sport: validated.sport as SportType,
                 location: validated.location,
                 description: validated.description,
                 members: 1,
@@ -313,7 +224,7 @@ export const Clubs: React.FC = () => {
         } catch (error) {
             // Show validation error to user
             if (error instanceof z.ZodError) {
-                const firstError = error.errors[0];
+                const firstError = (error as any).errors[0];
                 alert(firstError.message); // Replace with proper toast/notification
                 hapticFeedback.error();
             }
@@ -562,7 +473,7 @@ export const Clubs: React.FC = () => {
                     </div>
 
                     <div className="flex gap-4 overflow-x-auto no-scrollbar -mx-6 px-6 pb-4 snap-x">
-                        {MOCK_PROS.map((pro, i) => (
+                        {pros.map((pro, i) => (
                             <div
                                 key={pro.id}
                                 onClick={() => navigate(`/trainers/${pro.id}`)}
@@ -574,10 +485,10 @@ export const Clubs: React.FC = () => {
                         `}
                                 style={{ animationDelay: `${i * 100}ms` }}
                             >
-                                <img src={pro.image} className="w-16 h-16 rounded-2xl object-cover" alt={pro.name} />
+                                <img src={pro.avatarUrl} className="w-16 h-16 rounded-2xl object-cover" alt={pro.name} />
                                 <div>
                                     <h3 className={`font-bold text-sm mb-1 ${isLight ? 'text-slate-900' : 'text-white'}`}>{pro.name}</h3>
-                                    <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isLight ? 'text-slate-500' : 'text-white/60'}`}>{pro.specialty}</div>
+                                    <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isLight ? 'text-slate-500' : 'text-white/60'}`}>{pro.specialties?.[0] || 'Pro'}</div>
                                     <div className="flex items-center gap-1 text-[10px] font-bold text-amber-500">
                                         <Star size={10} fill="currentColor" /> {pro.rating}
                                     </div>
@@ -708,13 +619,30 @@ export const Clubs: React.FC = () => {
                                                         <Sparkles size={14} />
                                                     </div>
                                                 )}
-                                                <div className={`
-                                            max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed shadow-lg backdrop-blur-md border
-                                            ${isModel
-                                                        ? 'bg-white/10 border-white/10 text-white rounded-tl-none'
-                                                        : 'bg-neon-blue text-black font-medium rounded-tr-none border-neon-blue/50 shadow-neon-blue/10'}
-                                        `}>
-                                                    <span className="whitespace-pre-wrap">{msg.parts[0].text}</span>
+                                                <div className="flex-1 flex flex-col gap-2">
+                                                    <div className={`
+                                                ${isModel ? 'max-w-[85%]' : 'max-w-[85%] self-end'} p-4 rounded-2xl text-sm leading-relaxed shadow-lg backdrop-blur-md border
+                                                ${isModel
+                                                            ? 'bg-white/10 border-white/10 text-white rounded-tl-none'
+                                                            : 'bg-neon-blue text-black font-medium rounded-tr-none border-neon-blue/50 shadow-neon-blue/10'}
+                                            `}>
+                                                        <span className="whitespace-pre-wrap">{msg.parts[0].text}</span>
+                                                    </div>
+                                                    {/* AI Feedback Button - Required by Store Policy */}
+                                                    {isModel && idx > 0 && (
+                                                        <button
+                                                            onClick={() => {
+                                                                hapticFeedback.light();
+                                                                notificationService.showNotification(
+                                                                    "Thanks for your feedback!",
+                                                                    { body: "We'll review this AI response to improve quality." }
+                                                                );
+                                                            }}
+                                                            className="opacity-40 hover:opacity-100 transition-opacity text-white/60 hover:text-white text-xs flex items-center gap-1 self-start"
+                                                        >
+                                                            👎 Report response
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         );

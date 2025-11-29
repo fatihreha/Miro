@@ -48,6 +48,71 @@ export class ClubService {
     }
 
     /**
+     * Get all events
+     */
+    async getEvents(): Promise<any[]> {
+        try {
+            const { data, error } = await supabase
+                .from('events')
+                .select(`
+                    *,
+                    host:users!events_host_id_fkey(*)
+                `)
+                .order('date', { ascending: true });
+
+            if (error) {
+                console.error('Error fetching events:', error);
+                return [];
+            }
+
+            return data || [];
+        } catch (error) {
+            console.error('Get events error:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Create a new event
+     */
+    async createEvent(eventData: {
+        title: string;
+        sport: string;
+        date: string;
+        time: string;
+        location: string;
+        description: string;
+        hostId: string;
+    }): Promise<any | null> {
+        try {
+            const { data, error } = await supabase
+                .from('events')
+                .insert({
+                    title: eventData.title,
+                    sport: eventData.sport,
+                    date: eventData.date,
+                    time: eventData.time,
+                    location: eventData.location,
+                    description: eventData.description,
+                    host_id: eventData.hostId,
+                    attendees: 1
+                })
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Error creating event:', error);
+                return null;
+            }
+
+            return data;
+        } catch (error) {
+            console.error('Create event error:', error);
+            return null;
+        }
+    }
+
+    /**
      * Get club by ID with full details
      */
     async getClubById(clubId: string): Promise<any | null> {

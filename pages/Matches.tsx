@@ -12,130 +12,7 @@ import { requestService } from '../services/requestService';
 import { matchService } from '../services/matchService';
 import { realtimeManager } from '../services/realtimeManager';
 
-const MATCHES: User[] = [
-    {
-        id: '2',
-        name: 'Mike',
-        age: 29,
-        bio: 'Tennis obsessed. Looking for a partner who can keep a rally going. Usually play at City Courts on weekends.',
-        location: 'Downtown',
-        avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&auto=format&fit=crop&q=80',
-        photos: [
-            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&auto=format&fit=crop&q=80',
-            'https://images.unsplash.com/photo-1530549387789-4c1017266635?w=800&auto=format&fit=crop&q=80',
-            'https://images.unsplash.com/photo-1599586120429-48281b6f0ece?w=800&auto=format&fit=crop&q=80'
-        ],
-        interests: [SportType.TENNIS, SportType.RUNNING],
-        level: 'Pro',
-        distance: '5km',
-        matchPercentage: 92
-    },
-    {
-        id: '4',
-        name: 'Jessica',
-        age: 27,
-        bio: 'Looking for gym partner to stay motivated. I love HIIT and heavy lifting.',
-        location: 'North Hills',
-        avatarUrl: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=800&auto=format&fit=crop&q=80',
-        photos: [
-            'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=800&auto=format&fit=crop&q=80',
-            'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=800&auto=format&fit=crop&q=80'
-        ],
-        interests: [SportType.GYM, SportType.YOGA],
-        level: 'Beginner',
-        distance: '8km',
-        matchPercentage: 85
-    },
-    {
-        id: '5',
-        name: 'Aaron',
-        age: 31,
-        bio: 'Marathon training in progress. Need running buddies for long distance Sundays.',
-        location: 'Eastside',
-        avatarUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=800&auto=format&fit=crop&q=80',
-        photos: [
-            'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=800&auto=format&fit=crop&q=80'
-        ],
-        interests: [SportType.RUNNING, SportType.CYCLING],
-        level: 'Intermediate',
-        distance: '12km',
-        matchPercentage: 78
-    }
-];
-
-// Mock "Likes You" Users (Not matched yet)
-const MOCK_LIKES: User[] = [
-    {
-        id: 'l1',
-        name: 'Sophia',
-        age: 24,
-        bio: '',
-        location: '2km away',
-        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.YOGA],
-        level: 'Beginner'
-    },
-    {
-        id: 'l2',
-        name: 'James',
-        age: 30,
-        bio: '',
-        location: '5km away',
-        avatarUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.CROSSFIT],
-        level: 'Pro'
-    },
-    {
-        id: 'l3',
-        name: 'Elena',
-        age: 28,
-        bio: '',
-        location: '1km away',
-        avatarUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.TENNIS],
-        level: 'Intermediate'
-    },
-    {
-        id: 'l4',
-        name: 'Marcus',
-        age: 26,
-        bio: '',
-        location: '8km away',
-        avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.BASKETBALL],
-        level: 'Beginner'
-    }
-];
-
-// Mock Incoming Requests
-const MOCK_REQUESTS: ActivityRequest[] = [
-    {
-        id: 'req1',
-        senderId: '2',
-        senderName: 'Mike',
-        senderAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&auto=format&fit=crop&q=80',
-        receiverId: 'me',
-        sport: SportType.TENNIS,
-        date: 'Sat, Nov 24',
-        time: '10:00 AM',
-        location: 'City Courts',
-        status: 'pending',
-        timestamp: new Date()
-    },
-    {
-        id: 'req2',
-        senderId: '4',
-        senderName: 'Jessica',
-        senderAvatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=800&auto=format&fit=crop&q=80',
-        receiverId: 'me',
-        sport: SportType.GYM,
-        date: 'Mon, Nov 26',
-        time: '06:00 PM',
-        location: 'Iron Paradise',
-        status: 'pending',
-        timestamp: new Date()
-    }
-];
+// Mock data removed
 
 export const Matches: React.FC = () => {
     const navigate = useNavigate();
@@ -168,9 +45,8 @@ export const Matches: React.FC = () => {
                 }
             } catch (error) {
                 console.error('Error fetching matches:', error);
-                // Fallback to mock data
-                setMatches(MATCHES as any);
-                setWhoLikesYou(isPremium ? MOCK_LIKES : []);
+                setMatches([]);
+                setWhoLikesYou([]);
             } finally {
                 setIsLoadingMatches(false);
             }
@@ -263,7 +139,7 @@ export const Matches: React.FC = () => {
                     onClick={() => setActiveTab('matches')}
                     className={`flex-1 py-2.5 rounded-[20px] text-xs font-bold uppercase tracking-wide transition-all ${activeTab === 'matches' ? (isLight ? 'bg-white text-slate-900 shadow-sm' : 'bg-white text-black shadow-md') : (isLight ? 'text-slate-500 hover:text-slate-800' : 'text-white/60 hover:text-white')}`}
                 >
-                    Profiles ({MATCHES.length})
+                    Profiles ({matches.length})
                 </button>
                 <button
                     onClick={() => setActiveTab('requests')}
@@ -284,12 +160,12 @@ export const Matches: React.FC = () => {
                         <div className="flex items-center gap-2 mb-3">
                             <h3 className={`text-sm font-bold uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-white/60'}`}>Ready to Train</h3>
                             <div className="bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded text-[9px] font-bold flex items-center gap-1">
-                                <Crown size={10} fill="currentColor" /> {MOCK_LIKES.length}
+                                <Crown size={10} fill="currentColor" /> {whoLikesYou.length}
                             </div>
                         </div>
 
                         <div className="flex gap-3 overflow-x-auto no-scrollbar pb-4 -mx-6 px-6">
-                            {MOCK_LIKES.map((likeUser, idx) => (
+                            {whoLikesYou.map((likeUser, idx) => (
                                 <div
                                     key={likeUser.id}
                                     onClick={() => handleLikeClick(likeUser)}

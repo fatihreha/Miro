@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Camera Permission -->
+	<key>NSCameraUsageDescription</key>
+	<string>SportPulse needs camera access to let you upload profile photos and share your workout moments with your sports community.</string>
+	
+	<!-- Photo Library Permission -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose photos from your library to customize your profile and share your athletic journey.</string>
+	
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save your workout memories and achievements directly to your photo library.</string>
+	
+	<!-- Location Permission -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SportPulse uses your location to show nearby athletes, clubs, and events in your area. Location is only used when the app is open.</string>
+	
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>SportPulse uses your location to show nearby athletes, clubs, and events in your area.</string>
+	
+	<!-- Motion & Fitness -->
+	<key>NSMotionUsageDescription</key>
+	<string>Track your workouts and activity levels automatically.</string>
+	
+	<!-- User Tracking (ATT Framework - iOS 14.5+) -->
+	<key>NSUserTrackingUsageDescription</key>
+	<string>This helps us show you relevant sports content and connect you with the right training partners.</string>
+	
+	<!-- Notifications -->
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>Get notified when someone matches with you, messages you, or invites you to events.</string>
+	
+	<!-- Contacts (if you use contact matching) -->
+	<key>NSContactsUsageDescription</key>
+	<string>Find friends who are already using SportPulse to train together.</string>
+</dict>
+</plist>

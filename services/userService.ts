@@ -12,6 +12,42 @@ import { User, SportType } from '../types';
 
 export class UserService {
     /**
+     * Create new user profile
+     */
+    async createProfile(user: User): Promise<boolean> {
+        try {
+            // Convert app User type to DB columns
+            const dbUser = {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                // Default values
+                is_premium: false,
+                is_pro_trainer: false,
+                xp_points: 0,
+                user_level: 1,
+                daily_swipes: 0
+            };
+
+            const { error } = await supabase
+                .from('users')
+                .insert(dbUser);
+
+            if (error) {
+                console.error('Error creating profile:', error);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Create profile error:', error);
+            return false;
+        }
+    }
+
+    /**
      * Get user by ID
      */
     async getUserById(userId: string): Promise<User | null> {

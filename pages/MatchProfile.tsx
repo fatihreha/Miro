@@ -10,59 +10,9 @@ import { notificationService } from '../services/notificationService';
 import { ReportModal } from '../components/modals/ReportModal';
 import { useAuth } from '../context/AuthContext';
 import { useLayout } from '../context/LayoutContext';
+import { userService } from '../services/userService';
 
-// Fallback Mock Data if state is missing
-const MOCK_DB: Record<string, User> = {
-  '2': {
-    id: '2',
-    name: 'Mike',
-    age: 29,
-    bio: 'Tennis obsessed. Looking for a partner who can keep a rally going. Usually play at City Courts on weekends.',
-    location: 'Downtown',
-    avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&auto=format&fit=crop&q=80',
-    photos: [
-        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1530549387789-4c1017266635?w=800&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1599586120429-48281b6f0ece?w=800&auto=format&fit=crop&q=80'
-    ],
-    interests: [SportType.TENNIS, SportType.RUNNING],
-    level: 'Pro',
-    distance: '5km',
-    matchPercentage: 92,
-    matchReason: "Both obsessed with Tennis and play at a Pro level."
-  },
-  '4': {
-    id: '4',
-    name: 'Jessica',
-    age: 27,
-    bio: 'Looking for gym partner to stay motivated. I love HIIT and heavy lifting.',
-    location: 'North Hills',
-    avatarUrl: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=800&auto=format&fit=crop&q=80',
-    photos: [
-        'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=800&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=800&auto=format&fit=crop&q=80'
-    ],
-    interests: [SportType.GYM, SportType.YOGA],
-    level: 'Beginner',
-    distance: '8km',
-    matchPercentage: 85
-  },
-  '5': {
-    id: '5',
-    name: 'Aaron',
-    age: 31,
-    bio: 'Marathon training in progress. Need running buddies for long distance Sundays.',
-    location: 'Eastside',
-    avatarUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=800&auto=format&fit=crop&q=80',
-    photos: [
-        'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=800&auto=format&fit=crop&q=80'
-    ],
-    interests: [SportType.RUNNING, SportType.CYCLING],
-    level: 'Intermediate',
-    distance: '12km',
-    matchPercentage: 78
-  }
-};
+// Fallback Mock Data removed
 
 export const MatchProfile: React.FC = () => {
     const { userId } = useParams();
@@ -83,12 +33,17 @@ export const MatchProfile: React.FC = () => {
     }, [setTabBarVisible]);
 
     useEffect(() => {
-        const stateUser = location.state?.user;
-        if (stateUser) {
-            setUser(stateUser);
-        } else if (userId && MOCK_DB[userId]) {
-            setUser(MOCK_DB[userId]);
-        }
+        const loadUser = async () => {
+            if (location.state?.user) {
+                setUser(location.state.user);
+            } else if (userId) {
+                const fetchedUser = await userService.getUserById(userId);
+                if (fetchedUser) {
+                    setUser(fetchedUser);
+                }
+            }
+        };
+        loadUser();
     }, [userId, location.state]);
 
     const handleMessage = () => {
@@ -151,9 +106,9 @@ export const MatchProfile: React.FC = () => {
 
     return (
         <div className="fixed inset-0 z-50 bg-black font-sans overflow-hidden">
-             {/* Report Modal */}
+            {/* Report Modal */}
             {currentUser && (
-                <ReportModal 
+                <ReportModal
                     isOpen={isReportModalOpen}
                     onClose={() => setIsReportModalOpen(false)}
                     reportedUserId={user.id}
@@ -166,8 +121,8 @@ export const MatchProfile: React.FC = () => {
             <div className="absolute top-0 left-0 right-0 z-50 pt-safe-top px-2 flex gap-1.5 pointer-events-none mt-2">
                 {photos.map((_, idx) => (
                     <div key={idx} className="h-1 flex-1 rounded-full bg-white/20 overflow-hidden backdrop-blur-md">
-                        <div 
-                            className={`h-full bg-white shadow-glow transition-all duration-300 ${idx === currentPhotoIndex ? 'opacity-100' : (idx < currentPhotoIndex ? 'opacity-100' : 'opacity-0')}`} 
+                        <div
+                            className={`h-full bg-white shadow-glow transition-all duration-300 ${idx === currentPhotoIndex ? 'opacity-100' : (idx < currentPhotoIndex ? 'opacity-100' : 'opacity-0')}`}
                         />
                     </div>
                 ))}
@@ -175,15 +130,15 @@ export const MatchProfile: React.FC = () => {
 
             {/* --- TOP NAVIGATION --- */}
             <div className="absolute top-0 left-0 right-0 z-40 pt-safe-top p-4 flex justify-between items-center pointer-events-none mt-4">
-                <button 
-                    onClick={() => navigate(-1)} 
+                <button
+                    onClick={() => navigate(-1)}
                     className="w-12 h-12 rounded-full bg-black/20 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white hover:bg-black/40 transition active:scale-95 pointer-events-auto shadow-lg"
                 >
                     <ArrowLeft size={24} />
                 </button>
-                
+
                 <div className="relative pointer-events-auto">
-                    <button 
+                    <button
                         onClick={() => setShowOptions(!showOptions)}
                         className="w-12 h-12 rounded-full bg-black/20 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white hover:bg-black/40 transition active:scale-95 shadow-lg"
                     >
@@ -192,13 +147,13 @@ export const MatchProfile: React.FC = () => {
                     {/* Dropdown */}
                     {showOptions && (
                         <div className="absolute right-0 top-14 w-48 bg-[#1e1e24]/95 border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-slide-up origin-top-right backdrop-blur-xl">
-                             <button onClick={() => setIsReportModalOpen(true)} className="w-full text-left px-4 py-3 text-sm text-white/80 hover:bg-white/5 flex items-center gap-2 transition-colors">
+                            <button onClick={() => setIsReportModalOpen(true)} className="w-full text-left px-4 py-3 text-sm text-white/80 hover:bg-white/5 flex items-center gap-2 transition-colors">
                                 <ShieldAlert size={16} /> Report
-                             </button>
-                             <div className="h-px bg-white/5"></div>
-                             <button onClick={handleUnmatch} className="w-full text-left px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors">
+                            </button>
+                            <div className="h-px bg-white/5"></div>
+                            <button onClick={handleUnmatch} className="w-full text-left px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors">
                                 <HeartOff size={16} /> Unmatch
-                             </button>
+                            </button>
                         </div>
                     )}
                 </div>
@@ -207,21 +162,21 @@ export const MatchProfile: React.FC = () => {
             {/* --- MAIN IMAGE LAYER --- */}
             <div className="absolute inset-0 z-0 cursor-pointer" onClick={handleTap}>
                 {photos.map((photo, idx) => (
-                    <img 
+                    <img
                         key={idx}
-                        src={photo} 
-                        alt={`${user.name}`} 
-                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${idx === currentPhotoIndex ? 'opacity-100' : 'opacity-0'}`} 
+                        src={photo}
+                        alt={`${user.name}`}
+                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${idx === currentPhotoIndex ? 'opacity-100' : 'opacity-0'}`}
                     />
                 ))}
-                
+
                 {/* Cinematic Gradients */}
                 <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/90 pointer-events-none" />
             </div>
 
             {/* --- CONTENT SHEET (BOTTOM) --- */}
             <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none flex flex-col justify-end pb-safe-bottom">
-                
+
                 <div className="w-full pointer-events-auto px-4 pb-4">
                     {/* Compatibility Badge */}
                     {user.matchPercentage && (
@@ -237,7 +192,7 @@ export const MatchProfile: React.FC = () => {
                     <div className="relative rounded-[40px] bg-white/[0.07] backdrop-blur-[40px] border border-white/10 shadow-2xl overflow-hidden animate-slide-up">
                         {/* Inner content */}
                         <div className="p-6 sm:p-8 relative z-10">
-                            
+
                             {/* Header Info */}
                             <div className="flex justify-between items-start mb-2">
                                 <div>
@@ -256,7 +211,7 @@ export const MatchProfile: React.FC = () => {
                                         )}
                                     </div>
                                 </div>
-                                
+
                                 {/* Level Badge */}
                                 <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl bg-white/10 border border-white/10 backdrop-blur-md shadow-inner">
                                     <Activity size={18} className={user.level === 'Pro' ? 'text-amber-400' : 'text-white'} />
@@ -282,7 +237,7 @@ export const MatchProfile: React.FC = () => {
                             </div>
 
                             {/* Primary Action Button */}
-                            <button 
+                            <button
                                 onClick={handleMessage}
                                 className="w-full h-16 rounded-[24px] bg-white text-black font-display font-bold text-xl shadow-[0_0_40px_rgba(255,255,255,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 group"
                             >
@@ -290,7 +245,7 @@ export const MatchProfile: React.FC = () => {
                                 <span>Let's Train</span>
                             </button>
                         </div>
-                        
+
                         {/* Decorative bottom glow */}
                         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-neon-blue/10 to-transparent opacity-50 pointer-events-none"></div>
                     </div>

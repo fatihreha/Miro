@@ -10,53 +10,7 @@ import { hapticFeedback } from '../services/hapticService';
 import { useAuth } from '../context/AuthContext';
 import { trainerService } from '../services/trainerService';
 
-const MOCK_TRAINERS: User[] = [
-    {
-        id: 't1',
-        name: 'Coach David',
-        age: 32,
-        bio: 'Certified Personal Trainer specializing in HIIT and Strength Training. Let\'s crush your goals.',
-        location: 'Downtown Gym',
-        avatarUrl: 'https://images.unsplash.com/photo-1567598508481-65985588e295?w=800&auto=format&fit=crop&q=60',
-        interests: [SportType.GYM, SportType.BOXING],
-        level: 'Pro',
-        isTrainer: true,
-        hourlyRate: 60,
-        rating: 4.9,
-        reviewCount: 124,
-        specialties: ['Weight Loss', 'Muscle Building', 'HIIT']
-    },
-    {
-        id: 't2',
-        name: 'Sarah Jenkins',
-        age: 28,
-        bio: 'Yoga Alliance certified instructor. Focusing on flexibility, mindfulness, and core strength.',
-        location: 'Zen Studio',
-        avatarUrl: 'https://images.unsplash.com/photo-1594381898411-846e7d193883?w=800&auto=format&fit=crop&q=60',
-        interests: [SportType.YOGA],
-        level: 'Pro',
-        isTrainer: true,
-        hourlyRate: 45,
-        rating: 5.0,
-        reviewCount: 89,
-        specialties: ['Vinyasa', 'Meditation', 'Rehab']
-    },
-    {
-        id: 't3',
-        name: 'Mike Ross',
-        age: 35,
-        bio: 'Professional Tennis Coach. Former ATP player ready to improve your serve and volley.',
-        location: 'City Courts',
-        avatarUrl: 'https://images.unsplash.com/photo-1531427186611-ecfd6d936c79?w=800&auto=format&fit=crop&q=60',
-        interests: [SportType.TENNIS],
-        level: 'Pro',
-        isTrainer: true,
-        hourlyRate: 80,
-        rating: 4.8,
-        reviewCount: 56,
-        specialties: ['Serve Technique', 'Match Strategy']
-    }
-];
+// Mock data removed
 
 export const Trainers: React.FC = () => {
     const navigate = useNavigate();
@@ -79,7 +33,7 @@ export const Trainers: React.FC = () => {
                     sport: selectedSport !== 'All' ? selectedSport : undefined
                 });
 
-                let trainers = data.length > 0 ? data : MOCK_TRAINERS;
+                let trainers = data;
 
                 // Add current user if they're a trainer
                 if (currentUser?.isTrainer) {
@@ -89,7 +43,7 @@ export const Trainers: React.FC = () => {
                 setAllTrainers(trainers);
             } catch (e) {
                 console.error('Error loading trainers:', e);
-                setAllTrainers(MOCK_TRAINERS); // Fallback
+                setAllTrainers([]);
             }
         };
         loadTrainers();

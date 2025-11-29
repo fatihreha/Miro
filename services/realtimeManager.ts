@@ -134,7 +134,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Development helper
-if (process.env.NODE_ENV === 'development') {
+if (import.meta.env.MODE === 'development') {
     (window as any).realtimeManager = realtimeManager;
     console.log('💡 Realtime Manager available at window.realtimeManager');
 }

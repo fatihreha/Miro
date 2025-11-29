@@ -31,11 +31,12 @@ import { Privacy } from './pages/Privacy';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
-  
+
   if (isLoading) {
     return (
-      <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-white">
-        <div className="w-8 h-8 border-2 border-neon-blue border-t-transparent rounded-full animate-spin" />
+      <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-white" style={{ backgroundColor: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+        <div className="w-8 h-8 border-2 border-neon-blue border-t-transparent rounded-full animate-spin" style={{ width: '32px', height: '32px', border: '4px solid #00f2ff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -54,7 +55,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/welcome" element={<Welcome />} />
         <Route path="/auth" element={<Auth />} />
         <Route path="/onboarding" element={<Onboarding />} />
-        
+
         {/* Protected Routes */}
         <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
         <Route path="/matches" element={<ProtectedRoute><Matches /></ProtectedRoute>} />
@@ -72,12 +73,12 @@ const AppRoutes: React.FC = () => {
         <Route path="/premium" element={<ProtectedRoute><Premium /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/become-pro" element={<ProtectedRoute><BecomePro /></ProtectedRoute>} />
-        
+
         {/* Support & Legal Routes */}
         <Route path="/faq" element={<ProtectedRoute><FAQ /></ProtectedRoute>} />
         <Route path="/contact" element={<ProtectedRoute><Contact /></ProtectedRoute>} />
         <Route path="/privacy" element={<ProtectedRoute><Privacy /></ProtectedRoute>} />
-        
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

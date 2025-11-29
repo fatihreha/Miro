@@ -12,78 +12,7 @@ import { useLayout } from '../context/LayoutContext';
 import { matchService } from '../services/matchService';
 import { realtimeManager } from '../services/realtimeManager';
 
-const MOCK_USERS: User[] = [
-    {
-        id: 'mock1',
-        name: 'Sarah Connor',
-        age: 28,
-        gender: 'Female',
-        bio: 'Training for the apocalypse. Love high intensity cardio and heavy lifting.',
-        location: 'Los Angeles',
-        avatarUrl: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.GYM, SportType.RUNNING, SportType.BOXING],
-        level: 'Pro',
-        distance: '2km',
-        workoutTimePreference: 'Morning',
-        matchPercentage: 95
-    },
-    {
-        id: 'mock2',
-        name: 'Mike Ross',
-        age: 30,
-        gender: 'Male',
-        bio: 'Tennis pro looking for a hitting partner. Casual games or competitive sets.',
-        location: 'New York',
-        avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.TENNIS, SportType.RUNNING],
-        level: 'Pro',
-        distance: '5km',
-        workoutTimePreference: 'Evening',
-        matchPercentage: 88
-    },
-    {
-        id: 'mock3',
-        name: 'Emily Chen',
-        age: 25,
-        gender: 'Female',
-        bio: 'Yoga enthusiast and nature lover. Lets hike this weekend!',
-        location: 'San Francisco',
-        avatarUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.YOGA, SportType.HIKING],
-        level: 'Intermediate',
-        distance: '10km',
-        workoutTimePreference: 'Morning',
-        matchPercentage: 82
-    },
-    {
-        id: 'mock4',
-        name: 'David Goggins',
-        age: 40,
-        gender: 'Male',
-        bio: 'Stay hard. Ultra marathon runner. Can you keep up?',
-        location: 'Unknown',
-        avatarUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.RUNNING, SportType.GYM],
-        level: 'Pro',
-        distance: '15km',
-        workoutTimePreference: 'Morning',
-        matchPercentage: 75
-    },
-    {
-        id: 'mock5',
-        name: 'Alex Morgan',
-        age: 24,
-        gender: 'Female',
-        bio: 'Just started tennis, looking for another beginner to learn with!',
-        location: 'Chicago',
-        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=800&auto=format&fit=crop&q=80',
-        interests: [SportType.TENNIS],
-        level: 'Beginner',
-        distance: '3km',
-        workoutTimePreference: 'Evening',
-        matchPercentage: 60
-    }
-];
+// Mock data removed
 
 interface ProfileCardProps {
     user: User;
@@ -629,7 +558,7 @@ export const Home: React.FC = () => {
     useEffect(() => {
         const fetchUsers = async () => {
             if (!currentUser) {
-                setAllFetchedUsers(MOCK_USERS); // Fallback to mock if not logged in
+                setAllFetchedUsers([]);
                 setIsLoadingUsers(false);
                 return;
             }
@@ -645,16 +574,10 @@ export const Home: React.FC = () => {
                     levels: filters.levels
                 });
 
-                if (users.length > 0) {
-                    setAllFetchedUsers(users);
-                } else {
-                    // Fallback to mock if no users found
-                    setAllFetchedUsers(MOCK_USERS);
-                }
+                setAllFetchedUsers(users);
             } catch (error) {
                 console.error('Error fetching users:', error);
-                // Silent fail to mock data
-                setAllFetchedUsers(MOCK_USERS);
+                setAllFetchedUsers([]);
             } finally {
                 setIsLoadingUsers(false);
             }
@@ -785,6 +708,8 @@ export const Home: React.FC = () => {
     };
 
     if (visibleUsers.length === 0) {
+        const isFilterEmpty = allFetchedUsers.length > 0;
+
         return (
             <div className="h-full flex flex-col items-center justify-center text-center px-6 animate-fade-in">
                 <FilterModal
@@ -800,9 +725,13 @@ export const Home: React.FC = () => {
                 <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-6 animate-pulse">
                     <Filter size={40} className="opacity-40" />
                 </div>
-                <h3 className={`text-2xl font-bold mb-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>No matches found</h3>
+                <h3 className={`text-2xl font-bold mb-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    {isFilterEmpty ? 'No matches found' : 'No users yet'}
+                </h3>
                 <p className={`text-sm mb-8 max-w-xs mx-auto leading-relaxed ${isLight ? 'text-slate-500' : 'text-white/50'}`}>
-                    We couldn't find anyone matching your specific criteria. Try widening your search.
+                    {isFilterEmpty
+                        ? "We couldn't find anyone matching your specific criteria. Try widening your search."
+                        : "You're one of the first ones here! Check back later as more athletes join."}
                 </p>
                 <GlassButton onClick={() => setShowFilters(true)} variant="secondary" className="min-w-[200px]">
                     Adjust Filters

@@ -46,6 +46,32 @@ export class GamificationService {
     }
 
     /**
+     * Get user XP and Level
+     */
+    async getUserXP(userId: string): Promise<{ total_xp: number, level: number } | null> {
+        try {
+            const { data: user, error } = await supabase
+                .from('users')
+                .select('xp_points, user_level')
+                .eq('id', userId)
+                .single();
+
+            if (error) {
+                console.error('Error fetching user XP:', error);
+                return null;
+            }
+
+            return {
+                total_xp: user.xp_points || 0,
+                level: user.user_level || 1
+            };
+        } catch (error) {
+            console.error('Get user XP error:', error);
+            return null;
+        }
+    }
+
+    /**
      * Award badge to user
      */
     async awardBadge(userId: string, badgeId: string): Promise<boolean> {

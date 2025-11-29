@@ -24,7 +24,7 @@ CREATE OR REPLACE FUNCTION get_nearby_users(
   max_age INTEGER DEFAULT NULL
 )
 RETURNS TABLE (
-  user_id UUID,
+  id UUID,
   name TEXT,
   avatar_url TEXT,
   distance_km NUMERIC,
@@ -35,13 +35,13 @@ RETURNS TABLE (
 BEGIN
   RETURN QUERY
   SELECT 
-    u.id AS user_id,
+    u.id,
     u.name,
     u.avatar_url,
     ROUND(
       (earth_distance(
         ll_to_earth(u.latitude, u.longitude),
-        ll_to_earth(current_user.latitude, current_user.longitude)
+        ll_to_earth(requesting_user.latitude, requesting_user.longitude)
       ) / 1000)::NUMERIC, 
       2
     ) AS distance_km,
@@ -49,9 +49,9 @@ BEGIN
     u.level,
     u.age
   FROM users u
-  CROSS JOIN users current_user
-  WHERE current_user.id = user_id
-    AND u.id != user_id
+  CROSS JOIN users requesting_user
+  WHERE requesting_user.id = get_nearby_users.user_id
+    AND u.id != get_nearby_users.user_id
     AND u.show_location = true
     AND u.latitude IS NOT NULL
     AND u.longitude IS NOT NULL
@@ -69,6 +69,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 GRANT EXECUTE ON FUNCTION get_nearby_users TO authenticated;
 
 -- RLS policy for location data
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Users can update own location" ON users;
+DROP POLICY IF EXISTS "Users can see others' location if show_location is true" ON users;
+
 CREATE POLICY "Users can update own location"
 ON users
 FOR UPDATE

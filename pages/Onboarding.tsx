@@ -3,11 +3,13 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { GlassCard, GlassButton, GlassInput, GlassSelectable } from '../components/ui/Glass';
 import { SportType, User } from '../types';
-import { ChevronRight, ChevronLeft, MapPin, Target, Edit3, AlertCircle, Sun, Moon, Clock, Briefcase, CheckCircle2, Sparkles } from 'lucide-react';
+import { ChevronRight, ChevronLeft, MapPin, Target, Edit3, AlertCircle, Sun, Moon, Clock, Briefcase, CheckCircle2, Sparkles, Loader2, Navigation } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { hapticFeedback } from '../services/hapticService';
 import { useTheme } from '../context/ThemeContext';
 import { analyzeProfile } from '../services/geminiService';
+import { userService } from '../services/userService';
+import { locationService } from '../services/locationService';
 
 const TOTAL_INPUT_STEPS = 4;
 
@@ -22,7 +24,7 @@ export const Onboarding: React.FC = () => {
   const [isCompleted, setIsCompleted] = useState(false);
   const initialData = location.state?.initialData || {};
   
-  const [formData, setFormData] = useState<Partial<User> & { wantsPro?: boolean }>({
+  const [formData, setFormData] = useState<Partial<User> & { wantsPro?: boolean; latitude?: number; longitude?: number }>({
     name: initialData.name || '',
     age: '' as any,
     location: '',
@@ -32,8 +34,13 @@ export const Onboarding: React.FC = () => {
     workoutTimePreference: 'Any',
     avatarUrl: `https://i.pravatar.cc/400?u=${Math.floor(Math.random() * 1000)}`,
     wantsPro: false,
+    latitude: undefined,
+    longitude: undefined,
     ...initialData 
   });
+  
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialData.name && !formData.name) {
@@ -90,18 +97,38 @@ export const Onboarding: React.FC = () => {
              console.log("AI Analysis skipped for speed");
           }
 
-          // 2. Create Final User Object
+          // 2. Create Final User Object - use auth user ID from initialData
+          const authUserId = initialData.uid;
+          if (!authUserId) {
+              console.error('No auth user ID found - cannot create profile');
+              navigate('/auth?mode=signup');
+              return;
+          }
+          
           const finalUser: User = {
               ...formData as User,
-              id: Date.now().toString(),
+              id: authUserId, // Use actual Supabase Auth user ID
+              email: initialData.email || formData.email,
               matchPercentage: 0,
               aiPersona: aiPersona,
               isTrainer: false, // Default, changed later if BecomePro is completed
               dailySwipes: 10,
-              lastSwipeReset: new Date().toISOString()
+              lastSwipeReset: new Date().toISOString(),
+              // Location coordinates from GPS
+              latitude: formData.latitude,
+              longitude: formData.longitude,
+              showLocation: true // Default: show location
           };
 
-          // 3. Login (Updates Context)
+          // 3. Save to Supabase Database
+          try {
+              await userService.createProfile(finalUser);
+          } catch (dbError) {
+              console.error('Failed to save user to database:', dbError);
+              // Continue anyway - user can still use the app
+          }
+
+          // 4. Login (Updates Context)
           await login(finalUser);
 
           // 4. Navigate after a short "Celebration" delay
@@ -124,6 +151,50 @@ export const Onboarding: React.FC = () => {
     hapticFeedback.light();
     if (step > 1) setStep(s => s - 1);
     else navigate('/auth?mode=signup');
+  };
+
+  const handleGetLocation = async () => {
+    setIsGettingLocation(true);
+    setLocationError(null);
+    hapticFeedback.medium();
+
+    try {
+      // First check if geolocation is supported
+      if (!navigator.geolocation) {
+        setLocationError('Tarayıcınız konum servisini desteklemiyor.');
+        hapticFeedback.error();
+        return;
+      }
+
+      // Get location with city name (handles permission internally)
+      const locationData = await locationService.getCurrentLocationWithCity();
+      
+      setFormData(prev => ({
+        ...prev,
+        location: locationData.cityName,
+        latitude: locationData.latitude,
+        longitude: locationData.longitude
+      }));
+
+      hapticFeedback.success();
+    } catch (error: any) {
+      console.error('Location error:', error);
+      
+      // More specific error messages
+      const errorMessage = error?.message || '';
+      if (errorMessage.includes('izni')) {
+        setLocationError('Konum izni verilmedi. Tarayıcı adres çubuğundaki kilit simgesine tıklayarak izin verin.');
+      } else if (errorMessage.includes('zaman aşımı') || errorMessage.includes('timeout')) {
+        setLocationError('Konum alınamadı (zaman aşımı). Tekrar deneyin.');
+      } else if (errorMessage.includes('unavailable') || errorMessage.includes('alınamadı')) {
+        setLocationError('Konum servisi kullanılamıyor. GPS açık olduğundan emin olun.');
+      } else {
+        setLocationError(`Konum alınamadı: ${errorMessage || 'Bilinmeyen hata'}. Manuel girin.`);
+      }
+      hapticFeedback.error();
+    } finally {
+      setIsGettingLocation(false);
+    }
   };
 
   const toggleInterest = (sport: SportType) => {
@@ -243,15 +314,46 @@ export const Onboarding: React.FC = () => {
                 <label className={`block text-[10px] mb-2 ml-1 uppercase tracking-widest font-bold flex items-center gap-1 transition-colors group-focus-within:text-neon-blue ${isLight ? 'text-slate-400' : 'text-white/40'}`}>
                    Location
                 </label>
-                <div className={`relative transition-all duration-300 rounded-2xl group-focus-within:ring-2 group-focus-within:ring-neon-blue/50 ${isLight ? 'bg-white' : 'bg-black/20'}`}>
-                  <MapPin size={16} className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors group-focus-within:text-neon-blue ${isLight ? 'text-slate-400' : 'text-white/40'}`} />
-                  <GlassInput 
-                    placeholder="New York, NY" 
-                    value={formData.location} 
-                    onChange={e => setFormData({...formData, location: e.target.value})}
-                    className={`pl-12 !bg-transparent !border-transparent focus:!ring-0 ${isLight ? 'text-slate-900' : 'text-white'}`}
-                  />
+                <div className="flex gap-2">
+                  <div className={`relative flex-1 transition-all duration-300 rounded-2xl group-focus-within:ring-2 group-focus-within:ring-neon-blue/50 ${isLight ? 'bg-white' : 'bg-black/20'}`}>
+                    <MapPin size={16} className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors group-focus-within:text-neon-blue ${isLight ? 'text-slate-400' : 'text-white/40'}`} />
+                    <GlassInput 
+                      placeholder="İstanbul, Türkiye" 
+                      value={formData.location} 
+                      onChange={e => setFormData({...formData, location: e.target.value, latitude: undefined, longitude: undefined})}
+                      className={`pl-12 !bg-transparent !border-transparent focus:!ring-0 ${isLight ? 'text-slate-900' : 'text-white'}`}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGetLocation}
+                    disabled={isGettingLocation}
+                    className={`flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 ${
+                      isGettingLocation 
+                        ? 'bg-neon-blue/20 cursor-wait' 
+                        : 'bg-neon-blue hover:bg-neon-blue/80 active:scale-95'
+                    } ${isLight ? 'shadow-md' : ''}`}
+                    title="Konumumu Kullan"
+                  >
+                    {isGettingLocation ? (
+                      <Loader2 size={20} className="text-neon-blue animate-spin" />
+                    ) : (
+                      <Navigation size={20} className="text-black" />
+                    )}
+                  </button>
                 </div>
+                {locationError && (
+                  <p className="text-red-400 text-xs mt-2 ml-1 flex items-center gap-1">
+                    <AlertCircle size={12} />
+                    {locationError}
+                  </p>
+                )}
+                {formData.latitude && formData.longitude && (
+                  <p className="text-green-400 text-xs mt-2 ml-1 flex items-center gap-1">
+                    <CheckCircle2 size={12} />
+                    GPS koordinatları alındı
+                  </p>
+                )}
               </div>
             </div>
           </div>

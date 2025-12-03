@@ -51,10 +51,10 @@ export const Gamification: React.FC = () => {
         const leaders = await gamificationService.getLeaderboard('xp', 10);
         if (leaders.length > 0) {
           setLeaderboard(leaders.map((l, idx) => ({
-            id: l.userId,
-            name: l.userName || 'User',
-            xp: l.xp,
-            avatar: l.avatarUrl || 'https://i.pravatar.cc/150',
+            id: l.id,
+            name: l.name || 'User',
+            xp: l.xp_points,
+            avatar: l.avatar_url || 'https://i.pravatar.cc/150',
             rank: idx + 1
           })));
         }
@@ -65,6 +65,28 @@ export const Gamification: React.FC = () => {
     };
 
     loadGamificationData();
+
+    // Subscribe to real-time leaderboard updates
+    const unsubscribeLeaderboard = gamificationService.subscribeToLeaderboard((newLeaderboard) => {
+      setLeaderboard(newLeaderboard.map((l, idx) => ({
+        id: l.userId,
+        name: l.userName || 'User',
+        xp: l.xp,
+        avatar: l.avatarUrl || 'https://i.pravatar.cc/150',
+        rank: idx + 1
+      })));
+    });
+
+    // Subscribe to user XP changes
+    const unsubscribeXP = gamificationService.subscribeToUserXP(user.id, (xpData) => {
+      setUserXP(xpData.total_xp);
+      setCurrentLevel(xpData.level);
+    });
+
+    return () => {
+      unsubscribeLeaderboard();
+      unsubscribeXP();
+    };
   }, [user]);
 
   const progress = (userXP / nextLevelXP) * 100;

@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { analyzeProfile } from '../services/geminiService';
 import { useAuth } from '../context/AuthContext';
+import { userService } from '../services/userService';
 import { User } from '../types';
 import { Sparkles, CheckCircle, Fingerprint } from 'lucide-react';
 
@@ -36,14 +37,21 @@ export const Analysis: React.FC = () => {
       setStatus('Profile Optimized.');
 
       // Finalize
-      setTimeout(() => {
+      setTimeout(async () => {
         const finalUser: User = {
           ...userData,
-          id: Date.now().toString(),
+          id: crypto.randomUUID(),
           matchPercentage: 0,
           aiPersona: aiResult.persona,
           isTrainer: false // Default to false, BecomePro flow will set it true if completed
         };
+        
+        // Save to database
+        try {
+          await userService.createProfile(finalUser);
+        } catch (e) {
+          console.error('Failed to save user to DB:', e);
+        }
         
         login(finalUser);
         

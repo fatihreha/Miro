@@ -27,14 +27,14 @@ export const Bookings: React.FC = () => {
         trainerId: b.trainer_id,
         trainerName: b.trainer?.user?.name || 'Trainer',
         trainerAvatar: b.trainer?.user?.avatar_url || '',
-        service: 'Training Session', // TODO: Add service type to DB
+        service: b.service_type || b.trainer?.specialties?.[0] || 'Training Session',
         date: new Date(b.scheduled_date).toLocaleDateString(),
         fullDate: b.scheduled_date,
         time: b.scheduled_time,
         status: b.status,
         price: b.price,
-        location: b.trainer?.location || 'Location',
-        type: 'in-person' // Default
+        location: b.location || b.trainer?.location || 'Location',
+        type: b.session_type || 'in-person'
       }));
       setBookings(formatted);
     };
@@ -47,11 +47,22 @@ export const Bookings: React.FC = () => {
       : (b.status === 'completed' || b.status === 'cancelled')
   );
 
-  const handleCancelBooking = (id: string) => {
+  const handleCancelBooking = async (id: string) => {
     if (window.confirm('Are you sure you want to cancel this session?')) {
       hapticFeedback.medium();
+      
+      // Optimistic update
       setBookings(prev => prev.map(b => b.id === id ? { ...b, status: 'cancelled' } : b));
-      notificationService.showNotification("Booking Cancelled", { body: "The trainer has been notified." });
+      
+      try {
+        // Persist to database
+        await trainerService.cancelBooking(id);
+        notificationService.showNotification("Booking Cancelled", { body: "The trainer has been notified." });
+      } catch (error) {
+        // Rollback on error
+        setBookings(prev => prev.map(b => b.id === id ? { ...b, status: 'confirmed' } : b));
+        notificationService.showNotification("Error", { body: "Failed to cancel booking. Please try again." });
+      }
     }
   };
 

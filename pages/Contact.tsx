@@ -7,6 +7,7 @@ import { useTheme } from '../context/ThemeContext';
 import { hapticFeedback } from '../services/hapticService';
 import { notificationService } from '../services/notificationService';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../services/supabase';
 
 export const Contact: React.FC = () => {
   const navigate = useNavigate();
@@ -18,20 +19,37 @@ export const Contact: React.FC = () => {
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim()) return;
 
     setIsSending(true);
     hapticFeedback.medium();
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      // Save to database
+      const { error } = await supabase
+        .from('contact_messages')
+        .insert({
+          user_id: user?.id || null,
+          email: user?.email || 'guest@unknown.com',
+          subject,
+          message: message.trim(),
+          status: 'pending',
+          created_at: new Date().toISOString()
+        });
+
+      if (error) throw error;
+
       setIsSending(false);
       hapticFeedback.success();
       notificationService.showNotification("Message Sent", { body: "We'll get back to you shortly." });
       navigate(-1);
-    }, 1500);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setIsSending(false);
+      notificationService.showNotification("Error", { body: "Failed to send message. Please try again." });
+    }
   };
 
   return (

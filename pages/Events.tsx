@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { clubService } from '../services/clubService';
+import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
 import { GlassCard, GlassSelectable, GlassInput, GlassButton } from '../components/ui/Glass';
 import { SportType, SportEvent } from '../types';
@@ -38,26 +39,56 @@ export const Events: React.FC = () => {
     useEffect(() => {
         const loadEvents = async () => {
             const fetchedEvents = await clubService.getEvents();
-            const formattedEvents = fetchedEvents.map(e => ({
-                id: e.id,
-                hostId: e.host_id,
-                hostName: e.host?.name || 'Host',
-                hostAvatar: e.host?.avatar_url || '',
-                title: e.title,
-                sport: e.sport,
-                date: new Date(e.date).toLocaleDateString(),
-                time: e.time,
-                location: e.location,
-                description: e.description,
-                attendees: e.attendees || 0,
-                attendeeAvatars: [], // TODO: Fetch attendees
-                isJoined: false, // TODO: Check if joined
-                attendanceStatus: 'guest'
+            
+            // Fetch attendee data for each event
+            const formattedEvents = await Promise.all(fetchedEvents.map(async (e) => {
+                let attendeeAvatars: string[] = [];
+                let isJoined = false;
+
+                // Fetch attendees from event_attendees table
+                if (e.id && user) {
+                    try {
+                        const { data: attendees } = await import('../services/supabase').then(m =>
+                            m.supabase
+                                .from('event_attendees')
+                                .select('user_id, status, user:users(avatar_url)')
+                                .eq('event_id', e.id)
+                                .eq('status', 'going')
+                                .limit(5)
+                        );
+
+                        if (attendees) {
+                            attendeeAvatars = attendees
+                                .map((a: any) => a.user?.avatar_url)
+                                .filter(Boolean);
+                            isJoined = attendees.some((a: any) => a.user_id === user.id);
+                        }
+                    } catch (err) {
+                        console.error('Error fetching attendees:', err);
+                    }
+                }
+
+                return {
+                    id: e.id,
+                    hostId: e.host_id,
+                    hostName: e.host?.name || 'Host',
+                    hostAvatar: e.host?.avatar_url || '',
+                    title: e.title,
+                    sport: e.sport,
+                    date: new Date(e.date).toLocaleDateString(),
+                    time: e.time,
+                    location: e.location,
+                    description: e.description,
+                    attendees: e.attendees || 0,
+                    attendeeAvatars,
+                    isJoined,
+                    attendanceStatus: isJoined ? 'going' : 'guest'
+                };
             }));
             setEvents(formattedEvents);
         };
         loadEvents();
-    }, []);
+    }, [user]);  // Added user dependency
 
     const filteredEvents = events.filter(event => {
         const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) || event.location.toLowerCase().includes(searchQuery.toLowerCase());
@@ -65,27 +96,68 @@ export const Events: React.FC = () => {
         return matchesSearch && matchesSport;
     });
 
-    const toggleRSVP = (e: React.MouseEvent, eventId: string) => {
+    const toggleRSVP = async (e: React.MouseEvent, eventId: string) => {
         e.stopPropagation();
         hapticFeedback.medium();
-        setEvents(prev => prev.map(ev => {
-            if (ev.id === eventId) {
-                const currentStatus = ev.attendanceStatus || (ev.isJoined ? 'going' : 'guest');
+        
+        const event = events.find(ev => ev.id === eventId);
+        if (!event || !user) return;
 
-                if (currentStatus === 'guest') {
-                    // Send Request
-                    notificationService.showNotification("Request Sent", { body: `Host notified for ${ev.title}.` });
-                    return { ...ev, attendanceStatus: 'pending', isJoined: false };
-                } else if (currentStatus === 'pending') {
-                    // Cancel Request
-                    return { ...ev, attendanceStatus: 'guest', isJoined: false };
-                } else {
-                    // Leave Event
-                    return { ...ev, attendanceStatus: 'guest', isJoined: false, attendees: ev.attendees - 1 };
-                }
+        const currentStatus = event.attendanceStatus || (event.isJoined ? 'going' : 'guest');
+        let newStatus: 'guest' | 'pending' | 'going' = 'guest';
+        let newAttendees = event.attendees;
+
+        if (currentStatus === 'guest') {
+            newStatus = 'pending';
+            notificationService.showNotification("Request Sent", { body: `Host notified for ${event.title}.` });
+        } else if (currentStatus === 'pending') {
+            newStatus = 'guest';
+        } else {
+            newStatus = 'guest';
+            newAttendees = Math.max(0, event.attendees - 1);
+        }
+
+        // Optimistic update
+        setEvents(prev => prev.map(ev => 
+            ev.id === eventId 
+                ? { ...ev, attendanceStatus: newStatus, isJoined: newStatus === 'going', attendees: newAttendees }
+                : ev
+        ));
+
+        // Persist to database
+        try {
+            if (newStatus === 'guest') {
+                // Remove attendance record
+                await supabase
+                    .from('event_attendees')
+                    .delete()
+                    .eq('event_id', eventId)
+                    .eq('user_id', user.id);
+            } else {
+                // Upsert attendance record
+                await supabase
+                    .from('event_attendees')
+                    .upsert({
+                        event_id: eventId,
+                        user_id: user.id,
+                        status: newStatus
+                    }, { onConflict: 'event_id,user_id' });
             }
-            return ev;
-        }));
+
+            // Update event attendee count
+            await supabase
+                .from('events')
+                .update({ attendees: newAttendees })
+                .eq('id', eventId);
+        } catch (error) {
+            console.error('Error updating RSVP:', error);
+            // Rollback on error
+            setEvents(prev => prev.map(ev => 
+                ev.id === eventId 
+                    ? { ...ev, attendanceStatus: currentStatus, isJoined: currentStatus === 'going', attendees: event.attendees }
+                    : ev
+            ));
+        }
     };
 
     const handleCreateClick = () => {

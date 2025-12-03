@@ -47,21 +47,49 @@ export const Clubs: React.FC = () => {
 
                 // Load Events
                 const fetchedEvents = await clubService.getEvents();
-                const formattedEvents = fetchedEvents.map(e => ({
-                    id: e.id,
-                    hostId: e.host_id,
-                    hostName: e.host?.name || 'Host',
-                    hostAvatar: e.host?.avatar_url || '',
-                    title: e.title,
-                    sport: e.sport,
-                    date: new Date(e.date).toLocaleDateString(),
-                    time: e.time,
-                    location: e.location,
-                    description: e.description,
-                    attendees: e.attendees || 0,
-                    attendeeAvatars: [], // TODO: Fetch attendees
-                    isJoined: false, // TODO: Check if joined
-                    attendanceStatus: 'guest'
+                // Fetch attendee data for events
+                const formattedEvents = await Promise.all(fetchedEvents.map(async (e) => {
+                    let attendeeAvatars: string[] = [];
+                    let isJoined = false;
+
+                    if (e.id && user) {
+                        try {
+                            const { data: attendees } = await import('../services/supabase').then(m =>
+                                m.supabase
+                                    .from('event_attendees')
+                                    .select('user_id, status, user:users(avatar_url)')
+                                    .eq('event_id', e.id)
+                                    .eq('status', 'going')
+                                    .limit(5)
+                            );
+
+                            if (attendees) {
+                                attendeeAvatars = attendees
+                                    .map((a: any) => a.user?.avatar_url)
+                                    .filter(Boolean);
+                                isJoined = attendees.some((a: any) => a.user_id === user.id);
+                            }
+                        } catch (err) {
+                            console.error('Error fetching attendees:', err);
+                        }
+                    }
+
+                    return {
+                        id: e.id,
+                        hostId: e.host_id,
+                        hostName: e.host?.name || 'Host',
+                        hostAvatar: e.host?.avatar_url || '',
+                        title: e.title,
+                        sport: e.sport,
+                        date: new Date(e.date).toLocaleDateString(),
+                        time: e.time,
+                        location: e.location,
+                        description: e.description,
+                        attendees: e.attendees || 0,
+                        attendeeAvatars,
+                        isJoined,
+                        attendanceStatus: isJoined ? 'going' : 'guest'
+                    };
                 }));
                 setEvents(formattedEvents);
 

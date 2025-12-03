@@ -7,6 +7,8 @@ import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { notificationService } from '../services/notificationService';
 import { hapticFeedback } from '../services/hapticService';
+import { trainerService } from '../services/trainerService';
+import { supabase } from '../services/supabase';
 
 const SPECIALTIES_LIST = [
   'Weight Loss', 'Muscle Building', 'HIIT', 'Yoga', 'Pilates', 
@@ -57,14 +59,46 @@ export const BecomePro: React.FC = () => {
     }
   };
 
-  const handleApplyCoupon = () => {
+  const handleApplyCoupon = async () => {
     hapticFeedback.medium();
-    if (couponCode.toUpperCase() === 'FITPRO100' || couponCode.toUpperCase() === 'PULSE2025') {
-      setDiscountApplied(true);
-      notificationService.showNotification("Coupon Applied!", { body: "100% discount activated for influencer partnership." });
-      hapticFeedback.success();
-    } else {
+    
+    try {
+      // Check coupon in database
+      const { data: coupon, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .eq('code', couponCode.toUpperCase())
+        .eq('is_active', true)
+        .single();
+
+      if (coupon && !error) {
+        // Check if coupon is still valid (not expired, has uses left)
+        const now = new Date();
+        const expiresAt = coupon.expires_at ? new Date(coupon.expires_at) : null;
+        const isExpired = expiresAt && expiresAt < now;
+        const hasUsesLeft = coupon.max_uses === null || coupon.uses_count < coupon.max_uses;
+
+        if (!isExpired && hasUsesLeft) {
+          setDiscountApplied(true);
+          notificationService.showNotification("Coupon Applied!", { 
+            body: `${coupon.discount_percent}% discount activated!` 
+          });
+          hapticFeedback.success();
+          
+          // Increment usage count
+          await supabase
+            .from('coupons')
+            .update({ uses_count: (coupon.uses_count || 0) + 1 })
+            .eq('id', coupon.id);
+          return;
+        }
+      }
+      
       notificationService.showNotification("Invalid Code", { body: "Please check your coupon code." });
+      hapticFeedback.error();
+    } catch (error) {
+      console.error('Coupon validation error:', error);
+      notificationService.showNotification("Error", { body: "Could not validate coupon. Please try again." });
       hapticFeedback.error();
     }
   };
@@ -76,16 +110,49 @@ export const BecomePro: React.FC = () => {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 2000));
 
+    // Update local state
     await updateUser({
       isTrainer: true,
-      verificationStatus: 'verified', // Auto-verify for demo
+      verificationStatus: 'verified',
       specialties: specialties,
       hourlyRate: parseInt(rate),
       yearsExperience: parseInt(experience),
       certificates: fileName ? [fileName] : [],
-      userLevel: (user?.userLevel || 0) + 5, // XP Bonus
+      userLevel: (user?.userLevel || 0) + 5,
       level: 'Pro'
     });
+
+    // Persist to database - create trainer profile
+    if (user) {
+      try {
+        // Update user record
+        await supabase
+          .from('users')
+          .update({
+            is_pro_trainer: true,
+            verification_status: 'verified',
+            skill_level: 'Pro',
+            hourly_rate: parseInt(rate)
+          })
+          .eq('id', user.id);
+
+        // Create trainer record
+        await supabase
+          .from('trainers')
+          .upsert({
+            user_id: user.id,
+            specialties: specialties,
+            hourly_rate: parseInt(rate),
+            years_experience: parseInt(experience),
+            certificates: fileName ? [fileName] : [],
+            rating: 5.0,
+            total_sessions: 0,
+            availability: { days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], startHour: '09:00', endHour: '17:00' }
+          }, { onConflict: 'user_id' });
+      } catch (error) {
+        console.error('Error creating trainer profile:', error);
+      }
+    }
 
     setIsProcessing(false);
     hapticFeedback.success();

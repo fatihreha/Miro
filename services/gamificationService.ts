@@ -245,6 +245,63 @@ export class GamificationService {
             console.error('Check badge criteria error:', error);
         }
     }
+
+    /**
+     * Subscribe to leaderboard changes
+     */
+    subscribeToLeaderboard(callback: (leaderboard: any[]) => void): () => void {
+        const channel = supabase
+            .channel('leaderboard-changes')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'users',
+                    filter: 'xp_points=gte.0'
+                },
+                async () => {
+                    const leaderboard = await this.getLeaderboard('xp', 10);
+                    callback(leaderboard.map((l, idx) => ({
+                        userId: l.id,
+                        userName: l.name,
+                        xp: l.xp_points,
+                        avatarUrl: l.avatar_url,
+                        rank: idx + 1
+                    })));
+                }
+            )
+            .subscribe();
+
+        return () => channel.unsubscribe();
+    }
+
+    /**
+     * Subscribe to user XP changes
+     */
+    subscribeToUserXP(userId: string, callback: (xpData: { total_xp: number, level: number }) => void): () => void {
+        const channel = supabase
+            .channel(`user-xp-${userId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'users',
+                    filter: `id=eq.${userId}`
+                },
+                (payload) => {
+                    const updated = payload.new as any;
+                    callback({
+                        total_xp: updated.xp_points || 0,
+                        level: updated.user_level || 1
+                    });
+                }
+            )
+            .subscribe();
+
+        return () => channel.unsubscribe();
+    }
 }
 
 export const gamificationService = new GamificationService();

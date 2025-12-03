@@ -14,29 +14,65 @@ export class UserService {
     /**
      * Create new user profile
      */
-    async createProfile(user: User): Promise<boolean> {
+    async createProfile(user: User & { latitude?: number; longitude?: number; showLocation?: boolean }): Promise<boolean> {
         try {
-            // Convert app User type to DB columns
-            const dbUser = {
+            // Convert app User type to DB columns - only include columns that exist in the DB
+            const dbUser: Record<string, any> = {
                 id: user.id,
                 email: user.email,
                 name: user.name,
+                age: user.age || null,
+                gender: user.gender || null,
+                bio: user.bio || '',
+                location: user.location || '',
+                avatar_url: user.avatarUrl || null,
+                interests: user.interests || [],
+                skill_level: user.level || 'Beginner',
+                workout_time_preference: user.workoutTimePreference || 'Any',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
                 // Default values
                 is_premium: false,
-                is_pro_trainer: false,
+                is_pro_trainer: user.isTrainer || false,
                 xp_points: 0,
-                user_level: 1,
-                daily_swipes: 0
+                user_level: 1
             };
 
+            // Add location coordinates if available
+            if (user.latitude !== undefined && user.longitude !== undefined) {
+                dbUser.latitude = user.latitude;
+                dbUser.longitude = user.longitude;
+                dbUser.location_updated_at = new Date().toISOString();
+                dbUser.show_location = user.showLocation !== false;
+            }
+
+            // Use upsert to handle cases where profile might already exist
             const { error } = await supabase
                 .from('users')
-                .insert(dbUser);
+                .upsert(dbUser, { onConflict: 'id' });
 
             if (error) {
-                console.error('Error creating profile:', error);
+                console.error('Error creating profile:', error.message, error.details, error.hint);
+                // If it's a column error, try with minimal required fields
+                if (error.message?.includes('column') || error.code === '42703') {
+                    console.log('Retrying with minimal fields...');
+                    const minimalUser = {
+                        id: user.id,
+                        email: user.email,
+                        name: user.name,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    };
+                    const { error: minError } = await supabase
+                        .from('users')
+                        .upsert(minimalUser, { onConflict: 'id' });
+                    
+                    if (minError) {
+                        console.error('Minimal profile creation also failed:', minError);
+                        return false;
+                    }
+                    return true;
+                }
                 return false;
             }
 

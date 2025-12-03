@@ -76,6 +76,72 @@ export class RealtimeManager {
     }
 
     /**
+     * Subscribe to events updates
+     */
+    subscribeToEvents(callback: (events: any[]) => void): string {
+        const key = `events:all`;
+
+        this.unsubscribe(key);
+
+        const channel = supabase
+            .channel('events-changes')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'events'
+                },
+                async () => {
+                    const { data } = await supabase
+                        .from('events')
+                        .select('*, host:users!events_host_id_fkey(*)')
+                        .order('date', { ascending: true });
+                    callback(data || []);
+                }
+            )
+            .subscribe();
+
+        this.subscriptions.set(key, () => channel.unsubscribe());
+
+        return key;
+    }
+
+    /**
+     * Subscribe to trainer bookings
+     */
+    subscribeToBookings(trainerId: string, callback: (bookings: any[]) => void): string {
+        const key = `bookings:${trainerId}`;
+
+        this.unsubscribe(key);
+
+        const channel = supabase
+            .channel(`bookings-${trainerId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'bookings',
+                    filter: `trainer_id=eq.${trainerId}`
+                },
+                async () => {
+                    const { data } = await supabase
+                        .from('bookings')
+                        .select('*, user:users(*)')
+                        .eq('trainer_id', trainerId)
+                        .order('scheduled_date', { ascending: true });
+                    callback(data || []);
+                }
+            )
+            .subscribe();
+
+        this.subscriptions.set(key, () => channel.unsubscribe());
+
+        return key;
+    }
+
+    /**
      * Unsubscribe from a specific channel
      */
     unsubscribe(key: string): void {

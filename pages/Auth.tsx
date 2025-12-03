@@ -84,6 +84,14 @@ export const Auth: React.FC = () => {
     };
 
     const activateDemoMode = async () => {
+        // Production'da demo mode'u devre dışı bırak
+        if (import.meta.env.PROD) {
+            console.warn('Demo mode is disabled in production');
+            setError('Demo mode is not available in production.');
+            hapticFeedback.error();
+            return;
+        }
+
         console.log("Activating Demo Mode Fallback...");
         notificationService.showNotification("Demo Mode Activated", {
             body: "Logging in with local demo account due to connection status."
@@ -213,16 +221,7 @@ export const Auth: React.FC = () => {
                 if (result.error) throw result.error;
 
                 if (result.data.user) {
-                    // Create Profile in DB
-                    const newUser: User = {
-                        id: result.data.user.id,
-                        email: formData.email,
-                        name: formData.name,
-                        // Other fields handled by defaults in createProfile
-                    } as User;
-
-                    await userService.createProfile(newUser);
-
+                    // Navigate to onboarding - profile will be created there after all data is collected
                     navigate('/onboarding', {
                         state: {
                             initialData: {

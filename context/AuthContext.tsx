@@ -69,12 +69,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 setIsAuthenticated(true);
             } else {
                 console.warn("AuthContext: User profile not found for ID", userId);
-                // If profile missing but auth exists, maybe create it? 
-                // For now, just set authenticated but no profile data might be risky.
-                // Let's assume Auth.tsx handles creation.
+                // Profile missing - user needs to complete onboarding
+                // Set authenticated to false so they can complete registration
+                setUser(null);
+                setIsAuthenticated(false);
             }
         } catch (error) {
             console.error("AuthContext: Fetch profile error", error);
+            setUser(null);
+            setIsAuthenticated(false);
         } finally {
             setIsLoading(false);
         }

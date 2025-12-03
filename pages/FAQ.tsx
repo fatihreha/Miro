@@ -1,11 +1,13 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
 import { GlassCard } from '../components/ui/Glass';
 import { useTheme } from '../context/ThemeContext';
+import { supabase } from '../services/supabase';
 
-const FAQ_ITEMS = [
+// Fallback FAQ items (used if DB is empty or fails)
+const DEFAULT_FAQ_ITEMS = [
   {
     question: 'How does the matching algorithm work?',
     answer: 'Our AI analyzes your sports interests, skill levels, location, and availability to suggest the most compatible training partners. The more you use the app, the smarter it gets!'
@@ -37,6 +39,29 @@ export const FAQ: React.FC = () => {
   const { theme } = useTheme();
   const isLight = theme === 'light';
   const [openIndex, setOpenIndex] = useState<number | null>(0);
+  const [faqItems, setFaqItems] = useState(DEFAULT_FAQ_ITEMS);
+
+  // Load FAQ from database
+  useEffect(() => {
+    const loadFAQ = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('faq_items')
+          .select('question, answer')
+          .eq('is_active', true)
+          .order('order_index', { ascending: true });
+
+        if (data && data.length > 0 && !error) {
+          setFaqItems(data);
+        }
+        // If no data or error, keep default items
+      } catch (e) {
+        console.error('Error loading FAQ:', e);
+        // Keep default items on error
+      }
+    };
+    loadFAQ();
+  }, []);
 
   const toggleItem = (index: number) => {
     setOpenIndex(openIndex === index ? null : index);
@@ -56,7 +81,7 @@ export const FAQ: React.FC = () => {
       </div>
 
       <div className="space-y-4 animate-slide-up">
-        {FAQ_ITEMS.map((item, index) => (
+        {faqItems.map((item, index) => (
           <GlassCard 
             key={index}
             className={`overflow-hidden transition-all duration-300 ${isLight ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'}`}

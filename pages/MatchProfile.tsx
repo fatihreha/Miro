@@ -11,6 +11,7 @@ import { ReportModal } from '../components/modals/ReportModal';
 import { useAuth } from '../context/AuthContext';
 import { useLayout } from '../context/LayoutContext';
 import { userService } from '../services/userService';
+import { matchService } from '../services/matchService';
 
 // Fallback Mock Data removed
 
@@ -22,6 +23,7 @@ export const MatchProfile: React.FC = () => {
     const { setTabBarVisible } = useLayout();
 
     const [user, setUser] = useState<User | null>(null);
+    const [matchId, setMatchId] = useState<string | null>(null);
     const [showOptions, setShowOptions] = useState(false);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
     const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
@@ -36,6 +38,9 @@ export const MatchProfile: React.FC = () => {
         const loadUser = async () => {
             if (location.state?.user) {
                 setUser(location.state.user);
+                if (location.state?.matchId) {
+                    setMatchId(location.state.matchId);
+                }
             } else if (userId) {
                 const fetchedUser = await userService.getUserById(userId);
                 if (fetchedUser) {
@@ -51,9 +56,19 @@ export const MatchProfile: React.FC = () => {
         navigate(`/chat/${user?.id}`);
     };
 
-    const handleUnmatch = () => {
+    const handleUnmatch = async () => {
         if (window.confirm("Are you sure you want to unmatch?")) {
             hapticFeedback.medium();
+            
+            // Persist to database
+            if (matchId) {
+                try {
+                    await matchService.unmatch(matchId);
+                } catch (error) {
+                    console.error('Error unmatching:', error);
+                }
+            }
+
             notificationService.showNotification("Unmatched", { body: `You have unmatched with ${user?.name}.` });
             navigate('/matches');
         }

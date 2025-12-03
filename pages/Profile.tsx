@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GlassCard, GlassButton, GlassInput, GlassSelectable } from '../components/ui/Glass';
-import { MapPin, Edit2, Sparkles, Camera, Save, X, Settings, Activity, Target, Crown, ChevronRight, Share2, Zap, Briefcase, Calendar, Dumbbell } from 'lucide-react';
+import { MapPin, Edit2, Sparkles, Camera, Save, X, Settings, Activity, Target, Crown, ChevronRight, Share2, Zap, Briefcase, Calendar, Dumbbell, Navigation, Loader2 } from 'lucide-react';
 import { enhanceBio } from '../services/geminiService';
 import { useAuth } from '../context/AuthContext';
 import { SportType } from '../types';
@@ -11,6 +11,7 @@ import { hapticFeedback } from '../services/hapticService';
 import { userService } from '../services/userService';
 import { compressImage } from '../utils/imageCompression';
 import { notificationService } from '../services/notificationService';
+import { locationService } from '../services/locationService';
 
 export const Profile: React.FC = () => {
     const { user, updateUser } = useAuth();
@@ -28,6 +29,8 @@ export const Profile: React.FC = () => {
     const [showInterestModal, setShowInterestModal] = useState(false);
     const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
     const [userStats, setUserStats] = useState<any>(null);
+    const [isGettingLocation, setIsGettingLocation] = useState(false);
+    const [locationCoords, setLocationCoords] = useState<{ latitude?: number; longitude?: number }>({});
 
     useEffect(() => {
         if (user) {
@@ -72,14 +75,24 @@ export const Profile: React.FC = () => {
 
         hapticFeedback.success();
 
-        // Update via userService for better sync
-        await userService.updateProfile(user.id, {
+        // Prepare update data
+        const updateData: any = {
             name,
             age: Number(age),
             location,
             bio,
             interests
-        });
+        };
+
+        // Add coordinates if updated
+        if (locationCoords.latitude && locationCoords.longitude) {
+            updateData.latitude = locationCoords.latitude;
+            updateData.longitude = locationCoords.longitude;
+            updateData.location_updated_at = new Date().toISOString();
+        }
+
+        // Update via userService for better sync
+        await userService.updateProfile(user.id, updateData);
 
         // Also update local auth context
         updateUser({
@@ -91,6 +104,7 @@ export const Profile: React.FC = () => {
         });
 
         setIsEditing(false);
+        notificationService.showNotification("Profil Güncellendi!", { body: "Değişiklikler kaydedildi." });
     };
 
     const handleCancel = () => {
@@ -115,6 +129,30 @@ export const Profile: React.FC = () => {
         setBio(newBio);
         setIsEnhancing(false);
         hapticFeedback.success();
+    };
+
+    const handleGetLocation = async () => {
+        setIsGettingLocation(true);
+        hapticFeedback.medium();
+
+        try {
+            const locationData = await locationService.getCurrentLocationWithCity();
+            
+            setLocation(locationData.cityName);
+            setLocationCoords({
+                latitude: locationData.latitude,
+                longitude: locationData.longitude
+            });
+            
+            hapticFeedback.success();
+            notificationService.showNotification("Konum Güncellendi!", { body: locationData.cityName });
+        } catch (error: any) {
+            console.error('Location error:', error);
+            hapticFeedback.error();
+            notificationService.showNotification("Konum Hatası", { body: error.message || "Konum alınamadı" });
+        } finally {
+            setIsGettingLocation(false);
+        }
     };
 
     const toggleInterest = (sport: SportType) => {
@@ -209,7 +247,26 @@ export const Profile: React.FC = () => {
                                 <GlassInput value={name} onChange={(e) => setName(e.target.value)} className="text-center text-lg font-bold !py-2" placeholder="Name" />
                                 <div className="flex gap-2 justify-center">
                                     <GlassInput value={age} onChange={(e) => setAge(e.target.value)} className="text-center w-20 !py-2" placeholder="Age" type="number" />
-                                    <GlassInput value={location} onChange={(e) => setLocation(e.target.value)} className="text-center flex-1 !py-2" placeholder="Location" />
+                                    <div className="flex-1 flex gap-1">
+                                        <GlassInput value={location} onChange={(e) => { setLocation(e.target.value); setLocationCoords({}); }} className="text-center flex-1 !py-2" placeholder="Location" />
+                                        <button
+                                            type="button"
+                                            onClick={handleGetLocation}
+                                            disabled={isGettingLocation}
+                                            className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${
+                                                isGettingLocation 
+                                                    ? 'bg-neon-blue/20 cursor-wait' 
+                                                    : 'bg-neon-blue hover:bg-neon-blue/80 active:scale-95'
+                                            }`}
+                                            title="Konumumu Kullan"
+                                        >
+                                            {isGettingLocation ? (
+                                                <Loader2 size={16} className="text-neon-blue animate-spin" />
+                                            ) : (
+                                                <Navigation size={16} className="text-black" />
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         ) : (

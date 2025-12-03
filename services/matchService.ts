@@ -201,6 +201,42 @@ export class MatchService {
     }
 
     /**
+     * Get match by ID
+     */
+    async getMatchById(matchId: string, userId: string): Promise<any | null> {
+        try {
+            const { data, error } = await supabase
+                .from('matches')
+                .select(`
+          *,
+          user1:users!matches_user1_id_fkey(*),
+          user2:users!matches_user2_id_fkey(*)
+        `)
+                .eq('id', matchId)
+                .single();
+
+            if (error) {
+                console.error('Error fetching match:', error);
+                return null;
+            }
+
+            const partner = data.user1_id === userId ? data.user2 : data.user1;
+            return {
+                id: data.id,
+                matchedAt: new Date(data.matched_at),
+                compatibilityScore: data.compatibility_score,
+                matchReason: data.match_reason,
+                keyFactors: data.key_factors,
+                isActive: data.is_active,
+                partner: this.formatUser(partner)
+            };
+        } catch (error) {
+            console.error('Get match by ID error:', error);
+            return null;
+        }
+    }
+
+    /**
      * Unmatch with a user
      */
     async unmatch(matchId: string): Promise<boolean> {

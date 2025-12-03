@@ -12,7 +12,7 @@ import { hapticFeedback } from '../services/hapticService';
 
 export const Premium: React.FC = () => {
   const navigate = useNavigate();
-  const { updateUser } = useAuth();
+  const { user, updateUser } = useAuth();
   const { theme } = useTheme();
   const isLight = theme === 'light';
 
@@ -41,12 +41,12 @@ export const Premium: React.FC = () => {
   }, []);
 
   const handleSubscribe = async () => {
-    if (!selectedPlan) return;
+    if (!selectedPlan || !user) return;
     setIsPurchasing(selectedPlan);
     setError(null);
 
     try {
-      const { success } = await subscriptionService.purchasePackage(selectedPlan);
+      const { success } = await subscriptionService.purchasePackage(selectedPlan, user.id);
 
       if (success) {
         notificationService.showNotification("Welcome to Premium!", {
@@ -65,8 +65,9 @@ export const Premium: React.FC = () => {
   };
 
   const handleRestore = async () => {
+    if (!user) return;
     setIsPurchasing('restore');
-    const { restored } = await subscriptionService.restorePurchases();
+    const { restored } = await subscriptionService.restorePurchases(user.id);
     setIsPurchasing(null);
 
     if (restored) {

@@ -73,7 +73,7 @@ export interface MapLocation {
   id: string;
   name: string;
   type: LocationType;
-  coordinates: { x: number, y: number }; // Using percentage for mock map
+  coordinates: { lat: number, lng: number }; // Real GPS coordinates
   rating: number;
   reviews: number;
   description: string;

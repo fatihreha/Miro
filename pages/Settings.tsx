@@ -9,6 +9,8 @@ import { useTheme, LANGUAGES, Language } from '../context/ThemeContext';
 import { ProFinanceSettings } from '../types';
 import { hapticFeedback } from '../services/hapticService';
 import { subscriptionService } from '../services/subscriptionService';
+import { supabase } from '../services/supabase';
+import { userService } from '../services/userService';
 
 const Toggle: React.FC<{ checked: boolean; onChange: () => void }> = ({ checked, onChange }) => {
   const { theme } = useTheme();
@@ -82,11 +84,25 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const handleSaveFinance = () => {
+  const handleSaveFinance = async () => {
     hapticFeedback.success();
     updateUser({ proFinance: financeData });
     setShowFinanceModal(false);
     notificationService.showNotification("Finance Details Saved", { body: "Your payout information has been updated." });
+
+    // Persist to database
+    if (user) {
+      try {
+        await supabase
+          .from('users')
+          .update({
+            pro_finance: financeData
+          })
+          .eq('id', user.id);
+      } catch (error) {
+        console.error('Error saving finance data:', error);
+      }
+    }
   };
 
   const handleRestore = async () => {

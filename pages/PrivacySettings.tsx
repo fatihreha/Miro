@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { GlassCard, GlassButton } from '../components/ui/Glass';
 import {
     Shield, Download, Trash2, Check, X, AlertTriangle,
-    FileText, ArrowLeft, Eye, EyeOff, History
+    FileText, ArrowLeft, Eye, EyeOff, History, MapPin
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { privacyService, UserConsents } from '../services/privacyService';
+import { locationService } from '../services/locationService';
 
 export const PrivacySettings: React.FC = () => {
     const { user } = useAuth();
@@ -21,6 +22,7 @@ export const PrivacySettings: React.FC = () => {
         location: false,
         thirdParty: false
     });
+    const [showLocation, setShowLocation] = useState(true);
     const [loading, setLoading] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -30,7 +32,14 @@ export const PrivacySettings: React.FC = () => {
     useEffect(() => {
         loadConsents();
         checkDeletionRequest();
+        loadLocationPrivacy();
     }, [user]);
+
+    const loadLocationPrivacy = async () => {
+        if (!user) return;
+        // showLocation from user object if available
+        setShowLocation((user as any).showLocation !== false);
+    };
 
     const loadConsents = async () => {
         if (!user) return;
@@ -66,6 +75,21 @@ export const PrivacySettings: React.FC = () => {
             setConsents(newConsents);
         } catch (error) {
             alert('Rıza ayarı güncellenemedi');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleLocationPrivacyToggle = async () => {
+        if (!user) return;
+
+        setLoading(true);
+        try {
+            const newValue = !showLocation;
+            await locationService.setLocationPrivacy(user.id, newValue);
+            setShowLocation(newValue);
+        } catch (error) {
+            alert('Konum gizliliği güncellenemedi');
         } finally {
             setLoading(false);
         }
@@ -143,13 +167,6 @@ export const PrivacySettings: React.FC = () => {
             required: false
         },
         {
-            key: 'location' as keyof UserConsents,
-            title: 'Konum Takibi',
-            description: 'Yakınındaki kullanıcıları görmek için gerekli',
-            icon: <Shield className="w-5 h-5" />,
-            required: true
-        },
-        {
             key: 'thirdParty' as keyof UserConsents,
             title: '3. Taraf Paylaşımı',
             description: 'RevenueCat ve analitik servisleriyle veri paylaşımı',
@@ -202,6 +219,28 @@ export const PrivacySettings: React.FC = () => {
                     Rıza Yönetimi
                 </h2>
                 <div className="space-y-3">
+                    {/* Location Privacy Toggle - Separate from consents */}
+                    <GlassCard className="p-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <div className="text-blue-500"><MapPin className="w-5 h-5" /></div>
+                                    <h3 className="font-semibold">Konumumu Göster</h3>
+                                </div>
+                                <p className={`text-sm ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                                    Diğer kullanıcılar seni yakınlarında görebilsin
+                                </p>
+                            </div>
+                            <button
+                                onClick={handleLocationPrivacyToggle}
+                                disabled={loading}
+                                className={`ml-4 w-12 h-6 rounded-full transition-colors flex-shrink-0 cursor-pointer ${showLocation ? 'bg-green-500' : 'bg-gray-400'}`}
+                            >
+                                <div className={`w-5 h-5 bg-white rounded-full transition-transform ${showLocation ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                            </button>
+                        </div>
+                    </GlassCard>
+
                     {consentItems.map((item) => (
                         <GlassCard key={item.key} className="p-4">
                             <div className="flex items-center justify-between">

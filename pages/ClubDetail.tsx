@@ -9,6 +9,9 @@ import { hapticFeedback } from '../services/hapticService';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { clubService } from '../services/clubService';
+import { chatService } from '../services/chatService';
+import { realtimeManager } from '../services/realtimeManager';
+import { supabase } from '../services/supabase';
 
 // Mock data removed
 
@@ -68,23 +71,26 @@ export const ClubDetail: React.FC = () => {
             if (!initialClub && clubId) {
                 const fetchedClub = await clubService.getClubById(clubId);
                 if (fetchedClub) {
-                    setClub({
-                        ...fetchedClub,
-                        ownerId: fetchedClub.owner_id, // Map snake_case to camelCase
-                        image: fetchedClub.avatar_url || 'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=800&auto=format&fit=crop&q=60',
-                        members: fetchedClub.member_count,
-                        isMember: false, // TODO: Check membership
-                        membershipStatus: 'guest' // TODO: Check status
-                    });
+                    // Determine membership status
+                    let membershipStatus: 'guest' | 'pending' | 'member' | 'admin' = 'guest';
+                    let isMember = false;
 
-                    // Check membership status
                     if (user) {
                         const userClubs = await clubService.getUserClubs(user.id);
-                        const isMember = userClubs.some(c => c.id === fetchedClub.id);
+                        isMember = userClubs.some(c => c.id === fetchedClub.id);
                         if (isMember) {
-                            setClub(prev => ({ ...prev, isMember: true, membershipStatus: 'member' }));
+                            membershipStatus = fetchedClub.owner_id === user.id ? 'admin' : 'member';
                         }
                     }
+
+                    setClub({
+                        ...fetchedClub,
+                        ownerId: fetchedClub.owner_id,
+                        image: fetchedClub.avatar_url || 'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=800&auto=format&fit=crop&q=60',
+                        members: fetchedClub.member_count,
+                        isMember,
+                        membershipStatus
+                    });
                 }
             }
 
@@ -148,6 +154,63 @@ export const ClubDetail: React.FC = () => {
         }
     }, [club]);
 
+    // Subscribe to club chat messages
+    useEffect(() => {
+        if (!club?.id || !user) return;
+
+        const loadMessages = async () => {
+            // Load existing messages (using club_id as recipient pattern)
+            const existingMessages = await chatService.getMessages(user.id, `club_${club.id}`);
+            if (existingMessages.length > 0) {
+                const formattedMessages = existingMessages.map(m => ({
+                    id: m.id,
+                    sender: m.senderId === user.id ? 'You' : 'Member',
+                    senderId: m.senderId,
+                    text: m.text,
+                    time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    avatar: m.senderAvatar || 'https://i.pravatar.cc/150',
+                    read: true
+                }));
+                setMessages(formattedMessages);
+            }
+        };
+        loadMessages();
+
+        // Real-time subscription for new messages
+        const channel = supabase
+            .channel(`club-chat-${club.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'messages',
+                    filter: `recipient_id=eq.club_${club.id}`
+                },
+                (payload) => {
+                    const newMsg = payload.new as any;
+                    if (newMsg.sender_id !== user.id) {
+                        const formattedMsg = {
+                            id: newMsg.id,
+                            sender: 'Member',
+                            senderId: newMsg.sender_id,
+                            text: newMsg.content,
+                            time: new Date(newMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            avatar: 'https://i.pravatar.cc/150',
+                            read: false
+                        };
+                        setMessages(prev => [...prev, formattedMsg]);
+                        hapticFeedback.light();
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            channel.unsubscribe();
+        };
+    }, [club?.id, user]);
+
     const handleJoinToggle = async () => {
         if (!club || !user) return;
 
@@ -201,20 +264,32 @@ export const ClubDetail: React.FC = () => {
         }));
     };
 
-    const handleSendMessage = () => {
-        if (!chatMessage.trim()) return;
+    const handleSendMessage = async () => {
+        if (!chatMessage.trim() || !user || !club) return;
         hapticFeedback.light();
+        
+        const messageText = chatMessage.trim();
+        setChatMessage('');
+        
+        // Optimistic update - show message immediately
         const newMessage = {
             id: Date.now().toString(),
             sender: 'You',
-            text: chatMessage,
+            senderId: user.id,
+            text: messageText,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             avatar: user?.avatarUrl || 'https://i.pravatar.cc/150',
             read: false
         };
         setMessages(prev => [...prev, newMessage]);
-        setChatMessage('');
         setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+
+        // Save to database (club chat uses club ID as recipient)
+        try {
+            await chatService.sendMessage(user.id, `club_${club.id}`, messageText, 'text');
+        } catch (error) {
+            console.error('Error saving club message:', error);
+        }
     };
 
     const handleCreateEvent = async () => {
@@ -261,21 +336,43 @@ export const ClubDetail: React.FC = () => {
 
     // --- MANAGER FUNCTIONS ---
 
-    const handleAddRule = () => {
-        if (newRule.trim()) {
+    const handleAddRule = async () => {
+        if (newRule.trim() && club) {
             const updatedRules = [...rules, newRule.trim()];
             setRules(updatedRules);
             setClub({ ...club, rules: updatedRules });
             setNewRule('');
             hapticFeedback.success();
+
+            // Persist to database
+            try {
+                await supabase
+                    .from('clubs')
+                    .update({ rules: updatedRules })
+                    .eq('id', club.id);
+            } catch (error) {
+                console.error('Error saving rules:', error);
+            }
         }
     };
 
-    const handleDeleteRule = (idx: number) => {
+    const handleDeleteRule = async (idx: number) => {
         const updatedRules = rules.filter((_, i) => i !== idx);
         setRules(updatedRules);
         setClub({ ...club, rules: updatedRules });
         hapticFeedback.medium();
+
+        // Persist to database
+        if (club) {
+            try {
+                await supabase
+                    .from('clubs')
+                    .update({ rules: updatedRules })
+                    .eq('id', club.id);
+            } catch (error) {
+                console.error('Error saving rules:', error);
+            }
+        }
     };
 
     const handleAcceptApplicant = async (requestId: string) => {
@@ -301,11 +398,27 @@ export const ClubDetail: React.FC = () => {
         }
     };
 
-    const handleUpdateClubDetails = () => {
+    const handleUpdateClubDetails = async () => {
+        if (!club) return;
+        
         setClub({ ...club, name: editName, description: editDesc, location: editLoc });
         setIsEditing(false);
         hapticFeedback.success();
         notificationService.showNotification("Club Updated", { body: "Details saved successfully." });
+
+        // Persist to database
+        try {
+            await supabase
+                .from('clubs')
+                .update({
+                    name: editName,
+                    description: editDesc,
+                    location: editLoc
+                })
+                .eq('id', club.id);
+        } catch (error) {
+            console.error('Error updating club:', error);
+        }
     };
 
     if (!club) return null;

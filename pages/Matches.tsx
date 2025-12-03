@@ -92,21 +92,36 @@ export const Matches: React.FC = () => {
         });
     }, [matches, sortBy]);
 
-    const handleAcceptRequest = (reqId: string) => {
+    const handleAcceptRequest = async (reqId: string) => {
         hapticFeedback.success();
-        // Update local state
+        // Optimistic update
         setRequests(prev => prev.map(r => r.id === reqId ? { ...r, status: 'accepted' } : r));
-        // Update service persistence
-        requestService.updateRequestStatus(reqId, 'accepted');
-        notificationService.showNotification("Activity Accepted!", { body: "Added to your calendar." });
+        
+        try {
+            // Persist to database
+            await requestService.updateRequestStatus(reqId, 'accepted');
+            notificationService.showNotification("Activity Accepted!", { body: "Added to your calendar." });
+        } catch (error) {
+            // Rollback on error
+            setRequests(prev => prev.map(r => r.id === reqId ? { ...r, status: 'pending' } : r));
+            console.error('Failed to accept request:', error);
+        }
     };
 
-    const handleDeclineRequest = (reqId: string) => {
+    const handleDeclineRequest = async (reqId: string) => {
         hapticFeedback.medium();
-        // Remove from UI
+        const previousRequests = [...requests];
+        // Optimistic update - remove from UI
         setRequests(prev => prev.filter(r => r.id !== reqId));
-        // Update service persistence
-        requestService.updateRequestStatus(reqId, 'rejected');
+        
+        try {
+            // Persist to database
+            await requestService.updateRequestStatus(reqId, 'rejected');
+        } catch (error) {
+            // Rollback on error
+            setRequests(previousRequests);
+            console.error('Failed to decline request:', error);
+        }
     };
 
     const handleSetReminder = (req: ActivityRequest) => {

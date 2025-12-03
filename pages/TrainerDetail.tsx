@@ -12,14 +12,38 @@ import { ReportModal } from '../components/modals/ReportModal';
 import { trainerService } from '../services/trainerService';
 import { useAuth } from '../context/AuthContext';
 import { chatService } from '../services/chatService';
+import { supabase } from '../services/supabase';
 
 // Mock data removed
 
-const AVAILABLE_SLOTS = [
+// Default slots - will be overridden by trainer's actual availability
+const DEFAULT_SLOTS = [
     '07:00 AM', '08:30 AM', '10:00 AM',
     '01:00 PM', '02:30 PM', '04:00 PM',
     '05:30 PM', '07:00 PM'
 ];
+
+// Helper to generate time slots from trainer availability
+const generateTimeSlotsFromAvailability = (availability: { days: string[], startHour: string, endHour: string } | undefined): string[] => {
+    if (!availability || !availability.startHour || !availability.endHour) {
+        return DEFAULT_SLOTS;
+    }
+    
+    const slots: string[] = [];
+    const [startH] = availability.startHour.split(':').map(Number);
+    const [endH] = availability.endHour.split(':').map(Number);
+    
+    for (let hour = startH; hour < endH; hour++) {
+        const period = hour >= 12 ? 'PM' : 'AM';
+        const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+        slots.push(`${displayHour.toString().padStart(2, '0')}:00 ${period}`);
+        if (hour + 1 < endH) {
+            slots.push(`${displayHour.toString().padStart(2, '0')}:30 ${period}`);
+        }
+    }
+    
+    return slots.length > 0 ? slots : DEFAULT_SLOTS;
+};
 
 const SPECIALTIES_LIST = [
     'Weight Loss', 'Muscle Building', 'HIIT', 'Yoga', 'Pilates',
@@ -59,6 +83,11 @@ export const TrainerDetail: React.FC = () => {
     const [selectedDateObj, setSelectedDateObj] = useState<Date>(new Date());
     const [bookingTime, setBookingTime] = useState('');
     const [calendarDays] = useState(getNextDays(14));
+    
+    // Available slots based on trainer's availability
+    const availableSlots = trainer?.availability 
+        ? generateTimeSlotsFromAvailability(trainer.availability)
+        : DEFAULT_SLOTS;
 
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -122,15 +151,26 @@ export const TrainerDetail: React.FC = () => {
                 // We need name and avatar. 
                 // Let's fetch them.
                 const enhancedChats = await Promise.all(chats.map(async (chat) => {
-                    const user = await trainerService.getTrainerById(chat.partnerId) || await import('../services/userService').then(m => m.userService.getUserById(chat.partnerId));
+                    const chatUser = await trainerService.getTrainerById(chat.partnerId) || await import('../services/userService').then(m => m.userService.getUserById(chat.partnerId));
+                    
+                    // Get unread count from supabase
+                    const { count: unreadCount } = await import('../services/supabase').then(m => 
+                        m.supabase
+                            .from('messages')
+                            .select('*', { count: 'exact', head: true })
+                            .eq('recipient_id', currentUser.id)
+                            .eq('sender_id', chat.partnerId)
+                            .eq('is_read', false)
+                    );
+
                     return {
                         id: chat.partnerId,
                         senderId: chat.partnerId,
-                        senderName: user?.name || 'User',
-                        avatar: user?.avatarUrl || 'https://i.pravatar.cc/150',
+                        senderName: chatUser?.name || 'User',
+                        avatar: chatUser?.avatarUrl || 'https://i.pravatar.cc/150',
                         lastMessage: chat.lastMessage,
                         time: new Date(chat.timestamp).toLocaleTimeString(),
-                        unread: false // TODO: Implement unread count
+                        unread: unreadCount || 0
                     };
                 }));
                 setInquiries(enhancedChats);
@@ -182,7 +222,7 @@ export const TrainerDetail: React.FC = () => {
         }
     };
 
-    const handleSaveChanges = () => {
+    const handleSaveChanges = async () => {
         if (!trainer) return;
         const updatedData: Partial<User> = {
             name: editName,
@@ -195,6 +235,33 @@ export const TrainerDetail: React.FC = () => {
 
         setTrainer({ ...trainer, ...updatedData });
         updateUser(updatedData);
+
+        // Persist to database
+        try {
+            await trainerService.updateAvailability(trainer.id, editAvailability);
+            
+            // Also update user profile
+            await supabase
+                .from('users')
+                .update({
+                    name: editName,
+                    location: editLocation,
+                    bio: editBio,
+                    hourly_rate: parseInt(editRate)
+                })
+                .eq('id', trainer.id);
+
+            await supabase
+                .from('trainers')
+                .update({
+                    specialties: editSpecialties,
+                    hourly_rate: parseInt(editRate),
+                    availability: editAvailability
+                })
+                .eq('user_id', trainer.id);
+        } catch (error) {
+            console.error('Error saving trainer data:', error);
+        }
 
         setIsEditing(false);
         hapticFeedback.success();
@@ -227,9 +294,25 @@ export const TrainerDetail: React.FC = () => {
         navigate(`/chat/${trainer.id}`);
     };
 
-    const handleConfirmBooking = () => {
+    const handleConfirmBooking = async () => {
+        if (!currentUser || !trainer) return;
+        
         hapticFeedback.success();
         const dateStr = selectedDateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        
+        // Save booking to database
+        try {
+            await trainerService.bookSession({
+                userId: currentUser.id,
+                trainerId: trainer.id,
+                scheduledDate: selectedDateObj.toISOString().split('T')[0],
+                scheduledTime: bookingTime,
+                price: trainer.hourlyRate || 60
+            });
+        } catch (error) {
+            console.error('Error saving booking:', error);
+        }
+
         notificationService.showNotification("Session Booked!", {
             body: `Confirmed with ${trainer.name} for ${dateStr} at ${bookingTime}`,
             icon: trainer.avatarUrl
@@ -237,10 +320,22 @@ export const TrainerDetail: React.FC = () => {
         setBookingStep(null);
     };
 
-    const handleAcceptBooking = (bookingId: string) => {
+    const handleAcceptBooking = async (bookingId: string) => {
         hapticFeedback.success();
+        
+        // Optimistic update
         setMyBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'confirmed' } : b));
         notificationService.showNotification("Booking Confirmed", { body: "Client has been notified." });
+
+        // Persist to database
+        try {
+            await supabase
+                .from('bookings')
+                .update({ status: 'confirmed' })
+                .eq('id', bookingId);
+        } catch (error) {
+            console.error('Error confirming booking:', error);
+        }
     };
 
     const getDayName = (date: Date) => date.toLocaleDateString('en-US', { weekday: 'short' });
@@ -740,7 +835,7 @@ export const TrainerDetail: React.FC = () => {
                                             <Clock size={12} /> Select Time
                                         </label>
                                         <div className="grid grid-cols-3 gap-3">
-                                            {AVAILABLE_SLOTS.map(slot => {
+                                            {availableSlots.map(slot => {
                                                 const isSelected = bookingTime === slot;
                                                 return (
                                                     <button

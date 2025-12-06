@@ -32,7 +32,23 @@ export enum LocationType {
   COURT = 'Court',
   ROUTE = 'Route',
   POOL = 'Pool',
-  SALON = 'Salon' // Added for sponsored spots
+  SALON = 'Salon',
+  STADIUM = 'Stadium',
+  YOGA = 'Yoga Studio',
+  BOXING = 'Boxing Gym',
+  DANCE = 'Dance Studio',
+  MARTIAL_ARTS = 'Martial Arts',
+  CLIMBING = 'Climbing Wall',
+  TENNIS = 'Tennis Court',
+  BASKETBALL = 'Basketball Court',
+  FOOTBALL = 'Football Field',
+  VOLLEYBALL = 'Volleyball Court',
+  GOLF = 'Golf Course',
+  SKATE = 'Skate Park',
+  TRACK = 'Running Track',
+  CYCLING = 'Cycling Path',
+  BEACH = 'Beach',
+  CROSSFIT = 'CrossFit Box'
 }
 
 export enum ReportReason {

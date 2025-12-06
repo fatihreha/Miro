@@ -1,10 +1,11 @@
 
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LayoutProvider } from './context/LayoutContext';
+import { Splash } from './components/ui/Splash';
 
 // Loading Spinner Component
 const PageLoader: React.FC = () => (
@@ -97,6 +98,21 @@ const AppRoutes: React.FC = () => {
 };
 
 const App: React.FC = () => {
+  // Show splash only once ever (not per session)
+  const [showSplash, setShowSplash] = useState(() => {
+    const hasSeenSplash = localStorage.getItem('hasSeenSplash');
+    return !hasSeenSplash;
+  });
+
+  const handleSplashFinish = () => {
+    localStorage.setItem('hasSeenSplash', 'true');
+    setShowSplash(false);
+  };
+
+  if (showSplash) {
+    return <Splash onFinish={handleSplashFinish} />;
+  }
+
   return (
     <AuthProvider>
       <ThemeProvider>

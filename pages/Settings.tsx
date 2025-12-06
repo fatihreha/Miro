@@ -412,7 +412,10 @@ export const Settings: React.FC = () => {
         {/* Logout Button */}
         <div className="pt-4">
           <button 
-            onClick={logout}
+            onClick={async () => {
+              hapticFeedback.medium();
+              await logout();
+            }}
             className={`w-full p-4 rounded-[2rem] border flex items-center justify-center gap-2 font-bold transition-all active:scale-95 ${isLight ? 'bg-red-50 border-red-100 text-red-600 hover:bg-red-100' : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'}`}
           >
             <LogOut size={18} /> {t('sign_out')}

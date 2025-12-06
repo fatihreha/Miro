@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Bayon&family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap"
     rel="stylesheet">
   <script>
     tailwind.config = {
@@ -25,10 +25,14 @@
         extend: {
           fontFamily: {
             sans: ['Inter', 'sans-serif'],
-            display: ['Outfit', 'sans-serif'],
+            display: ['Bayon', 'sans-serif'],
           },
           colors: {
             background: '#000000',
+            brand: {
+              indigo: '#4b29ff',
+              lime: '#deff90',
+            },
             glass: {
               100: 'rgba(255, 255, 255, 0.03)',
               200: 'rgba(255, 255, 255, 0.05)',
@@ -37,15 +41,15 @@
               highlight: 'rgba(255, 255, 255, 0.15)',
             },
             neon: {
-              blue: '#00f2ff',
+              blue: '#4b29ff',
               purple: '#bd00ff',
-              lime: '#ccff00',
+              lime: '#deff90',
               orange: '#ff5e00',
               pink: '#ff0099',
             }
           },
           animation: {
-            'blob': 'blob 20s infinite alternate cubic-bezier(0.4, 0, 0.2, 1)',
+            'blob': 'blob 15s infinite alternate cubic-bezier(0.4, 0, 0.2, 1)',
             'fade-in': 'fadeIn 0.8s ease-out forwards',
             'slide-up': 'slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards',
             'pop': 'pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
@@ -56,10 +60,10 @@
           },
           keyframes: {
             blob: {
-              '0%': { transform: 'translate(0px, 0px) scale(1)', filter: 'blur(80px)' },
-              '33%': { transform: 'translate(30px, -50px) scale(1.1)', filter: 'blur(100px)' },
-              '66%': { transform: 'translate(-20px, 20px) scale(0.9)', filter: 'blur(60px)' },
-              '100%': { transform: 'translate(0px, 0px) scale(1)', filter: 'blur(80px)' },
+              '0%': { transform: 'translate(0px, 0px) scale(1)', filter: 'blur(60px)' },
+              '33%': { transform: 'translate(50px, -80px) scale(1.2)', filter: 'blur(80px)' },
+              '66%': { transform: 'translate(-40px, 40px) scale(0.8)', filter: 'blur(50px)' },
+              '100%': { transform: 'translate(20px, -20px) scale(1.1)', filter: 'blur(70px)' },
             },
             slideUp: {
               '0%': { transform: 'translateY(40px)', opacity: '0' },
@@ -151,7 +155,8 @@
     h4,
     h5,
     h6 {
-      font-family: 'Outfit', sans-serif;
+      font-family: 'Bayon', sans-serif;
+      letter-spacing: 0.05em;
     }
 
     /* Deep Liquid Noise Texture */
@@ -163,7 +168,7 @@
       height: 100%;
       pointer-events: none;
       z-index: 0;
-      opacity: 0.03;
+      opacity: 0.04;
       background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
     }
 

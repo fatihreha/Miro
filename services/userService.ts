@@ -28,7 +28,7 @@ export class UserService {
                 avatar_url: user.avatarUrl || null,
                 interests: user.interests || [],
                 skill_level: user.level || 'Beginner',
-                workout_time_preference: user.workoutTimePreference || 'Any',
+                workout_time_preference: user.workoutTimePreference || 'Anytime',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
                 // Default values

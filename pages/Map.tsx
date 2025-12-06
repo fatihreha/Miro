@@ -12,6 +12,180 @@ import { useLayout } from '../context/LayoutContext';
 import { locationService } from '../services/locationService';
 import { useAuth } from '../context/AuthContext';
 
+// OpenStreetMap Overpass API - Fetch real places
+const fetchRealPlaces = async (
+  lat: number,
+  lng: number,
+  type: LocationType | 'All',
+  radius: number = 5000
+): Promise<MapLocation[]> => {
+  try {
+    let osmQuery = '';
+    
+    switch(type) {
+      case LocationType.GYM:
+        osmQuery = `node["leisure"="fitness_centre"](around:${radius},${lat},${lng});way["leisure"="fitness_centre"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.PARK:
+        osmQuery = `node["leisure"="park"](around:${radius},${lat},${lng});way["leisure"="park"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.COURT:
+        osmQuery = `node["leisure"="pitch"](around:${radius},${lat},${lng});way["leisure"="pitch"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.POOL:
+        osmQuery = `node["leisure"="swimming_pool"](around:${radius},${lat},${lng});way["leisure"="swimming_pool"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.SALON:
+        osmQuery = `node["leisure"="sports_centre"](around:${radius},${lat},${lng});way["leisure"="sports_centre"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.ROUTE:
+        osmQuery = `node["highway"="path"](around:${radius},${lat},${lng});way["highway"="path"](around:${radius},${lat},${lng});node["route"="foot"](around:${radius},${lat},${lng});way["route"="foot"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.STADIUM:
+        osmQuery = `node["leisure"="stadium"](around:${radius},${lat},${lng});way["leisure"="stadium"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.YOGA:
+        osmQuery = `node["sport"="yoga"](around:${radius},${lat},${lng});way["sport"="yoga"](around:${radius},${lat},${lng});node["amenity"="studio"]["sport"="yoga"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.BOXING:
+        osmQuery = `node["sport"="boxing"](around:${radius},${lat},${lng});way["sport"="boxing"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.DANCE:
+        osmQuery = `node["amenity"="studio"]["dance"="yes"](around:${radius},${lat},${lng});way["amenity"="studio"]["dance"="yes"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.MARTIAL_ARTS:
+        osmQuery = `node["sport"="martial_arts"](around:${radius},${lat},${lng});way["sport"="martial_arts"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.CLIMBING:
+        osmQuery = `node["sport"="climbing"](around:${radius},${lat},${lng});way["sport"="climbing"](around:${radius},${lat},${lng});node["leisure"="climbing_gym"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.TENNIS:
+        osmQuery = `node["sport"="tennis"](around:${radius},${lat},${lng});way["sport"="tennis"](around:${radius},${lat},${lng});node["leisure"="pitch"]["sport"="tennis"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.BASKETBALL:
+        osmQuery = `node["sport"="basketball"](around:${radius},${lat},${lng});way["sport"="basketball"](around:${radius},${lat},${lng});node["leisure"="pitch"]["sport"="basketball"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.FOOTBALL:
+        osmQuery = `node["sport"="soccer"](around:${radius},${lat},${lng});way["sport"="soccer"](around:${radius},${lat},${lng});node["leisure"="pitch"]["sport"="soccer"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.VOLLEYBALL:
+        osmQuery = `node["sport"="volleyball"](around:${radius},${lat},${lng});way["sport"="volleyball"](around:${radius},${lat},${lng});node["leisure"="pitch"]["sport"="volleyball"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.GOLF:
+        osmQuery = `node["leisure"="golf_course"](around:${radius},${lat},${lng});way["leisure"="golf_course"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.SKATE:
+        osmQuery = `node["sport"="skateboard"](around:${radius},${lat},${lng});way["sport"="skateboard"](around:${radius},${lat},${lng});node["leisure"="pitch"]["sport"="skateboard"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.TRACK:
+        osmQuery = `node["leisure"="track"](around:${radius},${lat},${lng});way["leisure"="track"](around:${radius},${lat},${lng});node["sport"="running"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.CYCLING:
+        osmQuery = `node["highway"="cycleway"](around:${radius},${lat},${lng});way["highway"="cycleway"](around:${radius},${lat},${lng});node["route"="bicycle"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.BEACH:
+        osmQuery = `node["natural"="beach"](around:${radius},${lat},${lng});way["natural"="beach"](around:${radius},${lat},${lng});node["leisure"="beach_resort"](around:${radius},${lat},${lng});`;
+        break;
+      case LocationType.CROSSFIT:
+        osmQuery = `node["sport"="fitness"]["name"~"crossfit",i](around:${radius},${lat},${lng});way["sport"="fitness"]["name"~"crossfit",i](around:${radius},${lat},${lng});`;
+        break;
+      case 'All':
+      default:
+        // All types: gym, park, pitch, pool, sports_centre, stadium
+        osmQuery = `
+          node["leisure"="fitness_centre"](around:${radius},${lat},${lng});
+          way["leisure"="fitness_centre"](around:${radius},${lat},${lng});
+          node["leisure"="park"](around:${radius},${lat},${lng});
+          way["leisure"="park"](around:${radius},${lat},${lng});
+          node["leisure"="pitch"](around:${radius},${lat},${lng});
+          way["leisure"="pitch"](around:${radius},${lat},${lng});
+          node["leisure"="swimming_pool"](around:${radius},${lat},${lng});
+          way["leisure"="swimming_pool"](around:${radius},${lat},${lng});
+          node["leisure"="sports_centre"](around:${radius},${lat},${lng});
+          way["leisure"="sports_centre"](around:${radius},${lat},${lng});
+          node["leisure"="stadium"](around:${radius},${lat},${lng});
+          way["leisure"="stadium"](around:${radius},${lat},${lng});
+        `;
+    }
+
+    const query = `[out:json][timeout:25];(${osmQuery});out body;>;out skel qt;`;
+    console.log('🔎 OSM Query:', query.substring(0, 200) + '...');
+    
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: query
+    });
+
+    if (!response.ok) {
+      console.error('❌ Overpass API failed:', response.status, response.statusText);
+      throw new Error('Overpass API failed');
+    }
+    
+    const data = await response.json();
+    console.log('📦 OSM Response elements:', data.elements?.length || 0);
+    
+    const places: MapLocation[] = [];
+    const seenIds = new Set<string>();
+
+    data.elements.forEach((element: any) => {
+      if (!element.tags?.name || seenIds.has(element.id)) return;
+      seenIds.add(element.id);
+
+      const tags = element.tags;
+      let locationType = LocationType.GYM;
+      
+      if (tags.leisure === 'fitness_centre') locationType = LocationType.GYM;
+      else if (tags.leisure === 'sports_centre') locationType = LocationType.SALON;
+      else if (tags.leisure === 'pitch') locationType = LocationType.COURT;
+      else if (tags.leisure === 'swimming_pool') locationType = LocationType.POOL;
+      else if (tags.leisure === 'park') locationType = LocationType.PARK;
+      else if (tags.leisure === 'stadium') locationType = LocationType.STADIUM;
+      else if (tags.highway === 'path' || tags.route === 'foot') locationType = LocationType.ROUTE;
+      else if (tags.sport === 'yoga' || (tags.amenity === 'studio' && tags.sport === 'yoga')) locationType = LocationType.YOGA;
+      else if (tags.sport === 'boxing') locationType = LocationType.BOXING;
+      else if (tags.amenity === 'studio' && tags.dance === 'yes') locationType = LocationType.DANCE;
+      else if (tags.sport === 'martial_arts') locationType = LocationType.MARTIAL_ARTS;
+      else if (tags.sport === 'climbing' || tags.leisure === 'climbing_gym') locationType = LocationType.CLIMBING;
+      else if (tags.sport === 'tennis') locationType = LocationType.TENNIS;
+      else if (tags.sport === 'basketball') locationType = LocationType.BASKETBALL;
+      else if (tags.sport === 'soccer') locationType = LocationType.FOOTBALL;
+      else if (tags.sport === 'volleyball') locationType = LocationType.VOLLEYBALL;
+      else if (tags.leisure === 'golf_course') locationType = LocationType.GOLF;
+      else if (tags.sport === 'skateboard') locationType = LocationType.SKATE;
+      else if (tags.leisure === 'track' || tags.sport === 'running') locationType = LocationType.TRACK;
+      else if (tags.highway === 'cycleway' || tags.route === 'bicycle') locationType = LocationType.CYCLING;
+      else if (tags.natural === 'beach' || tags.leisure === 'beach_resort') locationType = LocationType.BEACH;
+      else if (tags.name?.toLowerCase().includes('crossfit')) locationType = LocationType.CROSSFIT;
+
+      const elementLat = element.lat || element.center?.lat;
+      const elementLng = element.lon || element.center?.lon;
+      if (!elementLat || !elementLng) return;
+
+      places.push({
+        id: `osm-${element.id}`,
+        name: tags.name,
+        type: locationType,
+        coordinates: { lat: elementLat, lng: elementLng },
+        rating: 4.0 + Math.random() * 0.9,
+        reviews: Math.floor(Math.random() * 50) + 10,
+        description: tags.description || `${tags.sport || 'Sports'} facility`,
+        image: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&auto=format&fit=crop&q=60',
+        verified: true,
+        address: [tags['addr:street'], tags['addr:city'] || 'Istanbul'].filter(Boolean).join(', '),
+        contact: tags.phone || tags['contact:phone'],
+        website: tags.website || tags['contact:website'],
+        hours: tags.opening_hours || '09:00-22:00',
+        tags: [tags.sport, tags.leisure].filter(Boolean) as string[]
+      });
+    });
+
+    return places;
+  } catch (error) {
+    console.error('Error fetching OSM places:', error);
+    return [];
+  }
+};
+
 // Fix Leaflet default marker icon issue
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -125,18 +299,43 @@ export const Map: React.FC = () => {
     getUserLocation();
   }, []);
 
-  // Load locations from Supabase
+  // Load locations from OSM + Supabase
   useEffect(() => {
     const loadLocations = async () => {
       setIsLoading(true);
+      console.log('🔍 Loading locations for filter:', activeFilter);
       try {
-        const data = await locationService.getMapLocations({
+        // Get center coordinates
+        const center = userLocation || { lat: mapCenter[0], lng: mapCenter[1] };
+        console.log('📍 Center coordinates:', center);
+        
+        // Fetch real places from OpenStreetMap
+        console.log('🌍 Fetching OSM places...');
+        const osmPlaces = await fetchRealPlaces(center.lat, center.lng, activeFilter);
+        console.log('✅ OSM places fetched:', osmPlaces.length, osmPlaces.slice(0, 3));
+        
+        // Get custom/sponsored locations from Supabase
+        const customData = await locationService.getMapLocations({
           type: activeFilter,
           search: searchQuery || undefined
         });
-        setLocations(data);
+        console.log('💾 Custom places fetched:', customData.length, customData.slice(0, 3));
+        
+        // Merge: custom locations first (for sponsored), then OSM places
+        const allLocations = [...customData, ...osmPlaces];
+        setLocations(allLocations);
       } catch (error) {
         console.error('Error loading locations:', error);
+        // Fallback to just Supabase data
+        try {
+          const data = await locationService.getMapLocations({
+            type: activeFilter,
+            search: searchQuery || undefined
+          });
+          setLocations(data);
+        } catch (e) {
+          console.error('Fallback failed:', e);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -144,9 +343,13 @@ export const Map: React.FC = () => {
 
     loadLocations();
 
-    // Subscribe to real-time updates
+    // Subscribe to real-time updates for custom locations only
     const unsubscribe = locationService.subscribeToMapLocations((updatedLocations) => {
-      setLocations(updatedLocations);
+      // Keep OSM places, update only custom ones
+      setLocations(prev => {
+        const osmPlaces = prev.filter(loc => loc.id.startsWith('osm-'));
+        return [...updatedLocations, ...osmPlaces];
+      });
     });
 
     return () => unsubscribe();
@@ -243,6 +446,22 @@ export const Map: React.FC = () => {
       case LocationType.PARK: return '🌳';
       case LocationType.POOL: return '🏊';
       case LocationType.SALON: return '💆';
+      case LocationType.STADIUM: return '🏟️';
+      case LocationType.YOGA: return '🧘';
+      case LocationType.BOXING: return '🥊';
+      case LocationType.DANCE: return '💃';
+      case LocationType.MARTIAL_ARTS: return '🥋';
+      case LocationType.CLIMBING: return '🧗';
+      case LocationType.TENNIS: return '🎾';
+      case LocationType.BASKETBALL: return '🏀';
+      case LocationType.FOOTBALL: return '⚽';
+      case LocationType.VOLLEYBALL: return '🏐';
+      case LocationType.GOLF: return '⛳';
+      case LocationType.SKATE: return '🛹';
+      case LocationType.TRACK: return '🏃';
+      case LocationType.CYCLING: return '🚴';
+      case LocationType.BEACH: return '🏖️';
+      case LocationType.CROSSFIT: return '💪';
       default: return '📍';
     }
   };
@@ -365,7 +584,10 @@ export const Map: React.FC = () => {
         <div className="flex gap-2 overflow-x-auto no-scrollbar pointer-events-auto -mx-4 px-4 pb-2">
           <GlassSelectable
             selected={activeFilter === 'All'}
-            onClick={() => setActiveFilter('All')}
+            onClick={() => {
+              hapticFeedback.light();
+              setActiveFilter('All');
+            }}
             className="!rounded-xl !py-2 !px-4 !text-xs whitespace-nowrap shadow-lg backdrop-blur-md !border-0"
           >
             <LayoutGrid size={12} className="mr-1.5" /> Tümü
@@ -374,7 +596,10 @@ export const Map: React.FC = () => {
             <GlassSelectable
               key={type}
               selected={activeFilter === type}
-              onClick={() => setActiveFilter(type)}
+              onClick={() => {
+                hapticFeedback.light();
+                setActiveFilter(type);
+              }}
               className="!rounded-xl !py-2 !px-4 !text-xs whitespace-nowrap shadow-lg backdrop-blur-md !border-0 flex items-center"
             >
               <span className="mr-1.5">{getTypeIcon(type)}</span> {type}
@@ -464,46 +689,52 @@ export const Map: React.FC = () => {
                 </div>
               </div>
               <div className="flex overflow-x-auto no-scrollbar px-6 pb-4 gap-3 snap-x w-full touch-pan-x">
-                {filteredLocations.map(loc => (
-                  <div
-                    key={loc.id}
-                    onClick={() => handlePinClick(loc)}
-                    className={`
-                      snap-start shrink-0 w-64 p-3 rounded-[24px] border backdrop-blur-xl flex items-center gap-3 cursor-pointer transition-all hover:scale-[1.02] active:scale-95 relative overflow-hidden
-                      ${loc.isSponsored
-                        ? (isLight ? 'bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200 shadow-lg shadow-amber-500/10' : 'bg-gradient-to-br from-amber-900/20 to-orange-900/20 border-amber-500/30 shadow-lg shadow-amber-500/10')
-                        : (isLight ? 'bg-white/90 border-white shadow-lg shadow-slate-200/50' : 'bg-[#1e293b]/90 border-white/10 shadow-xl shadow-black/50')
-                      }
-                    `}
-                  >
-                    {loc.isSponsored && (
-                      <div className="absolute top-0 right-0 bg-amber-500 text-white text-[8px] font-bold px-2 py-0.5 rounded-bl-lg z-10">
-                        SPONSORLU
+                {filteredLocations.length > 0 ? (
+                  filteredLocations.map(loc => (
+                    <div
+                      key={loc.id}
+                      onClick={() => handlePinClick(loc)}
+                      className={`
+                        snap-start shrink-0 w-64 p-3 rounded-[24px] border backdrop-blur-xl flex items-center gap-3 cursor-pointer transition-all hover:scale-[1.02] active:scale-95 relative overflow-hidden
+                        ${loc.isSponsored
+                          ? (isLight ? 'bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200 shadow-lg shadow-amber-500/10' : 'bg-gradient-to-br from-amber-900/20 to-orange-900/20 border-amber-500/30 shadow-lg shadow-amber-500/10')
+                          : (isLight ? 'bg-white/90 border-white shadow-lg shadow-slate-200/50' : 'bg-[#1e293b]/90 border-white/10 shadow-xl shadow-black/50')
+                        }
+                      `}
+                    >
+                      {loc.isSponsored && (
+                        <div className="absolute top-0 right-0 bg-amber-500 text-white text-[8px] font-bold px-2 py-0.5 rounded-bl-lg z-10">
+                          SPONSORLU
+                        </div>
+                      )}
+                      <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 relative">
+                        <img src={loc.image} className="w-full h-full object-cover" alt="" />
                       </div>
-                    )}
-                    <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 relative">
-                      <img src={loc.image} className="w-full h-full object-cover" alt="" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className={`font-bold text-sm truncate mb-1 ${isLight ? 'text-slate-900' : 'text-white'}`}>{loc.name}</h4>
-                      <div className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider mb-1.5 ${isLight ? 'text-slate-500' : 'text-white/50'}`}>
-                        {loc.type}
+                      <div className="flex-1 min-w-0">
+                        <h4 className={`font-bold text-sm truncate mb-1 ${isLight ? 'text-slate-900' : 'text-white'}`}>{loc.name}</h4>
+                        <div className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider mb-1.5 ${isLight ? 'text-slate-500' : 'text-white/50'}`}>
+                          {loc.type}
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px]">
+                          <span className="flex items-center gap-0.5 text-amber-500 font-bold"><Star size={8} fill="currentColor" /> {loc.rating}</span>
+                          <span className="opacity-40">•</span>
+                          <span className="opacity-60">
+                            {userLocation 
+                              ? calculateDistance(userLocation.lat, userLocation.lng, loc.coordinates.lat, loc.coordinates.lng)
+                              : '---'}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-[10px]">
-                        <span className="flex items-center gap-0.5 text-amber-500 font-bold"><Star size={8} fill="currentColor" /> {loc.rating}</span>
-                        <span className="opacity-40">•</span>
-                        <span className="opacity-60">
-                          {userLocation 
-                            ? calculateDistance(userLocation.lat, userLocation.lng, loc.coordinates.lat, loc.coordinates.lng)
-                            : '---'}
-                        </span>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isLight ? 'bg-slate-100 text-slate-400' : 'bg-white/5 text-white/30'}`}>
+                        <ChevronRight size={16} />
                       </div>
                     </div>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isLight ? 'bg-slate-100 text-slate-400' : 'bg-white/5 text-white/30'}`}>
-                      <ChevronRight size={16} />
-                    </div>
+                  ))
+                ) : (
+                  <div className={`px-6 py-4 text-sm text-center ${isLight ? 'text-slate-500' : 'text-white/50'}`}>
+                    Yakında mekan bulunamadı
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}

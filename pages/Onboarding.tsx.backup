@@ -3,16 +3,15 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { GlassCard, GlassButton, GlassInput, GlassSelectable } from '../components/ui/Glass';
 import { SportType, User } from '../types';
-import { ChevronRight, ChevronLeft, MapPin, Target, Edit3, AlertCircle, Sun, Moon, Clock, Briefcase, CheckCircle2, Sparkles, Loader2, Navigation, Camera, Upload } from 'lucide-react';
+import { ChevronRight, ChevronLeft, MapPin, Target, Edit3, AlertCircle, Sun, Moon, Clock, Briefcase, CheckCircle2, Sparkles, Loader2, Navigation } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { hapticFeedback } from '../services/hapticService';
 import { useTheme } from '../context/ThemeContext';
 import { analyzeProfile } from '../services/geminiService';
 import { userService } from '../services/userService';
 import { locationService } from '../services/locationService';
-import { storageHelpers } from '../services/supabase';
 
-const TOTAL_INPUT_STEPS = 5;
+const TOTAL_INPUT_STEPS = 4;
 
 export const Onboarding: React.FC = () => {
   const navigate = useNavigate();
@@ -32,7 +31,7 @@ export const Onboarding: React.FC = () => {
     interests: [],
     level: 'Beginner',
     bio: '',
-    workoutTimePreference: 'Anytime',
+    workoutTimePreference: 'Any',
     avatarUrl: `https://i.pravatar.cc/400?u=${Math.floor(Math.random() * 1000)}`,
     wantsPro: false,
     latitude: undefined,
@@ -42,8 +41,6 @@ export const Onboarding: React.FC = () => {
   
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [photoError, setPhotoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialData.name && !formData.name) {
@@ -63,12 +60,10 @@ export const Onboarding: React.FC = () => {
           formData.location.trim().length > 2
         );
       case 2:
-        return true; // Photo is optional
-      case 3:
         return formData.interests && formData.interests.length > 0;
-      case 4:
+      case 3:
         return !!formData.workoutTimePreference;
-      case 5:
+      case 4:
         return formData.bio && formData.bio.trim().length > 10;
       default:
         return false;
@@ -215,51 +210,6 @@ export const Onboarding: React.FC = () => {
     });
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      setPhotoError('Please select an image file');
-      hapticFeedback.error();
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      setPhotoError('Image must be less than 5MB');
-      hapticFeedback.error();
-      return;
-    }
-
-    setIsUploadingPhoto(true);
-    setPhotoError(null);
-    hapticFeedback.medium();
-
-    try {
-      const userId = initialData.uid || 'temp-' + Date.now();
-      const result = await storageHelpers.uploadAvatar(userId, file);
-      
-      if (result.error) {
-        throw new Error(result.error.message);
-      }
-
-      setFormData(prev => ({
-        ...prev,
-        avatarUrl: result.data?.url
-      }));
-
-      hapticFeedback.success();
-    } catch (error: any) {
-      console.error('Photo upload error:', error);
-      setPhotoError(error?.message || 'Failed to upload photo');
-      hapticFeedback.error();
-    } finally {
-      setIsUploadingPhoto(false);
-    }
-  };
-
   // Header Content based on Step
   const getHeaderContent = () => {
     switch(step) {
@@ -270,20 +220,15 @@ export const Onboarding: React.FC = () => {
         };
       case 2:
         return {
-          title: "Show your face!",
-          subtitle: "Upload a photo so others can recognize you. (Optional)"
-        };
-      case 3:
-        return {
           title: "What moves you?",
           subtitle: "Pick your top sports. We'll find your perfect teammate."
         };
-      case 4:
+      case 3:
         return {
           title: "When do you grind?",
           subtitle: "Timing is everything. Let's sync your schedule."
         };
-      case 5:
+      case 4:
         return {
           title: "Define your game.",
           subtitle: "Pro athlete or weekend warrior? No judgment here."
@@ -416,124 +361,6 @@ export const Onboarding: React.FC = () => {
       case 2:
         return (
           <div key="step2" className="space-y-6 animate-slide-up pb-8">
-            <div className="flex flex-col items-center justify-center min-h-[300px] space-y-6">
-              {/* Avatar Preview */}
-              <div className="relative group animate-pop">
-                <div className={`w-40 h-40 rounded-full overflow-hidden border-4 transition-all duration-300 ${
-                  formData.avatarUrl 
-                    ? 'border-neon-blue shadow-[0_0_30px_rgba(0,242,255,0.3)]' 
-                    : (isLight ? 'border-slate-200' : 'border-white/10')
-                }`}>
-                  {formData.avatarUrl ? (
-                    <img 
-                      src={formData.avatarUrl} 
-                      alt="Avatar Preview" 
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className={`w-full h-full flex items-center justify-center ${isLight ? 'bg-slate-100' : 'bg-white/5'}`}>
-                      <Camera size={48} className={isLight ? 'text-slate-300' : 'text-white/20'} />
-                    </div>
-                  )}
-                </div>
-                
-                {/* Upload Button Overlay */}
-                {!isUploadingPhoto && (
-                  <label 
-                    htmlFor="avatar-upload"
-                    className={`absolute inset-0 rounded-full cursor-pointer flex items-center justify-center transition-all duration-300 ${
-                      formData.avatarUrl 
-                        ? 'opacity-0 group-hover:opacity-100 bg-black/60' 
-                        : 'opacity-0 group-hover:opacity-100 bg-neon-blue/20'
-                    }`}
-                  >
-                    <Upload size={32} className="text-white drop-shadow-lg" />
-                  </label>
-                )}
-                
-                {/* Loading Spinner */}
-                {isUploadingPhoto && (
-                  <div className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center">
-                    <Loader2 size={32} className="text-neon-blue animate-spin" />
-                  </div>
-                )}
-              </div>
-
-              {/* Hidden File Input */}
-              <input
-                id="avatar-upload"
-                type="file"
-                accept="image/*"
-                capture="user"
-                onChange={handlePhotoUpload}
-                disabled={isUploadingPhoto}
-                className="hidden"
-              />
-
-              {/* Upload Button */}
-              <div className="flex flex-col items-center gap-3 w-full max-w-xs">
-                <label
-                  htmlFor="avatar-upload"
-                  className={`w-full px-6 py-4 rounded-2xl border-2 border-dashed transition-all duration-300 cursor-pointer text-center ${
-                    isUploadingPhoto
-                      ? 'border-neon-blue/50 bg-neon-blue/10 cursor-wait'
-                      : (isLight 
-                          ? 'border-slate-300 bg-white hover:border-slate-900 hover:bg-slate-50' 
-                          : 'border-white/20 bg-white/5 hover:border-neon-blue hover:bg-white/10')
-                  }`}
-                >
-                  <div className="flex items-center justify-center gap-3">
-                    {isUploadingPhoto ? (
-                      <>
-                        <Loader2 size={20} className="text-neon-blue animate-spin" />
-                        <span className={`font-medium ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
-                          Uploading...
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload size={20} className={isLight ? 'text-slate-600' : 'text-white/70'} />
-                        <span className={`font-medium ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                          {formData.avatarUrl ? 'Change Photo' : 'Upload Photo'}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </label>
-
-                {/* Error Message */}
-                {photoError && (
-                  <div className="flex items-center gap-2 text-red-400 text-sm animate-slide-up">
-                    <AlertCircle size={16} />
-                    <span>{photoError}</span>
-                  </div>
-                )}
-
-                {/* Info Text */}
-                <p className={`text-xs text-center ${isLight ? 'text-slate-400' : 'text-white/40'}`}>
-                  JPG, PNG or WEBP • Max 5MB
-                </p>
-              </div>
-
-              {/* Skip Button */}
-              {!formData.avatarUrl && (
-                <button
-                  type="button"
-                  onClick={handleNext}
-                  disabled={isUploadingPhoto}
-                  className={`text-sm font-medium transition-colors ${
-                    isLight ? 'text-slate-400 hover:text-slate-600' : 'text-white/40 hover:text-white/70'
-                  } disabled:opacity-50`}
-                >
-                  Skip for now →
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      case 3:
-        return (
-          <div key="step3" className="space-y-6 animate-slide-up pb-8">
             <div className="flex flex-wrap gap-3 justify-center">
               {Object.values(SportType).map((sport, index) => {
                 const isSelected = formData.interests?.includes(sport);
@@ -570,11 +397,11 @@ export const Onboarding: React.FC = () => {
             </div>
           </div>
         );
-      case 4:
+      case 3:
         return (
-          <div key="step4" className="space-y-6 animate-slide-up pb-8">
+          <div key="step3" className="space-y-6 animate-slide-up pb-8">
             <div className="grid gap-4">
-              {['Morning', 'Evening', 'Anytime'].map((time, index) => {
+              {['Morning', 'Evening', 'Any'].map((time, index) => {
                 const isSelected = formData.workoutTimePreference === time;
                 return (
                   <div
@@ -599,16 +426,16 @@ export const Onboarding: React.FC = () => {
                               <div className={`p-4 rounded-full transition-colors duration-300 ${isSelected ? 'bg-neon-blue text-black' : (isLight ? 'bg-slate-100 text-slate-400' : 'bg-white/5 text-white/40')}`}>
                                   {time === 'Morning' && <Sun size={24} />}
                                   {time === 'Evening' && <Moon size={24} />}
-                                  {time === 'Anytime' && <Clock size={24} />}
+                                  {time === 'Any' && <Clock size={24} />}
                               </div>
                               <div>
                                   <div className={`font-display font-bold text-xl transition-colors ${isSelected ? (isLight ? 'text-slate-900' : 'text-white') : (isLight ? 'text-slate-400' : 'text-white/60')}`}>
-                                      {time}
+                                      {time === 'Any' ? 'Anytime' : time}
                                   </div>
                                   <div className={`text-xs mt-1 transition-colors ${isSelected ? (isLight ? 'text-slate-600' : 'text-white/80') : (isLight ? 'text-slate-400' : 'text-white/40')}`}>
                                       {time === 'Morning' && 'Rise and grind! ☀️'}
                                       {time === 'Evening' && 'After hours athlete 🌙'}
-                                      {time === 'Anytime' && 'Flexible schedule 🕒'}
+                                      {time === 'Any' && 'Flexible schedule 🕒'}
                                   </div>
                               </div>
                           </div>
@@ -619,9 +446,9 @@ export const Onboarding: React.FC = () => {
             </div>
           </div>
         );
-      case 5:
+      case 4:
         return (
-          <div key="step5" className="space-y-6 animate-slide-up pb-20">
+          <div key="step4" className="space-y-6 animate-slide-up pb-20">
             <div className="grid gap-3">
               {['Beginner', 'Intermediate', 'Pro'].map((lvl, index) => {
                  const isSelected = formData.level === lvl;

@@ -98,6 +98,36 @@ export const authHelpers = {
   }
 };
 
+// Supabase Storage Helpers
+export const storageHelpers = {
+  // Upload file
+  async uploadFile(bucket: string, path: string, file: File) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+    return { data, error };
+  },
+
+  // Get public URL
+  getPublicUrl(bucket: string, path: string) {
+    const { data } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(path);
+    return data.publicUrl;
+  },
+
+  // Delete file
+  async deleteFile(bucket: string, path: string) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .remove([path]);
+    return { data, error };
+  }
+};
+
 // Supabase Database Helpers
 export const dbHelpers = {
   // Generic fetch
@@ -132,58 +162,6 @@ export const dbHelpers = {
       .from(table)
       .delete()
       .eq('id', id);
-    return { data, error };
-  }
-};
-
-// Supabase Storage Helpers
-export const storageHelpers = {
-  // Upload file
-  async uploadFile(bucket: string, path: string, file: File) {
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .upload(path, file, {
-        cacheControl: '3600',
-        upsert: false
-      });
-    return { data, error };
-  },
-
-  // Upload avatar - specialized function for user avatars
-  async uploadAvatar(userId: string, file: File) {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${userId}-${Date.now()}.${fileExt}`;
-    const filePath = `${fileName}`;
-    
-    const { data, error } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: true
-      });
-    
-    if (error) return { data: null, error };
-    
-    const { data: { publicUrl } } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath);
-    
-    return { data: { path: filePath, url: publicUrl }, error: null };
-  },
-
-  // Get public URL
-  getPublicUrl(bucket: string, path: string) {
-    const { data } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(path);
-    return data.publicUrl;
-  },
-
-  // Delete file
-  async deleteFile(bucket: string, path: string) {
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .remove([path]);
     return { data, error };
   }
 };

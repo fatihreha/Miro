@@ -1,10 +1,9 @@
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GlassButton } from '../components/ui/Glass';
 import { Activity, Heart, Zap, ArrowRight } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import { useAuth } from '../context/AuthContext';
 import { SportType } from '../types';
 
 // Helper to render sport tags - MOVED OUTSIDE
@@ -17,14 +16,6 @@ const SportTag: React.FC<{ label: string }> = ({ label }) => (
 export const Welcome: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTheme();
-  const { isAuthenticated } = useAuth();
-
-  // Authenticated kullanıcıları home'a yönlendir
-  useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/', { replace: true });
-    }
-  }, [isAuthenticated, navigate]);
 
   // Prepare sports for marquee
   const allSports = Object.values(SportType);

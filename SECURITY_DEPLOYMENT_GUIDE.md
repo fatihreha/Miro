@@ -31,14 +31,14 @@ supabase functions deploy gemini-proxy --project-ref YOUR_PROJECT_REF
 
 ```bash
 # Gemini API key'i Supabase secrets'a ekle
-supabase secrets set GEMINI_API_KEY="AIzaSyDv07rr9WgrVJ_nEgEwMxhR9GVuECzqybo" --project-ref YOUR_PROJECT_REF
+supabase secrets set GEMINI_API_KEY="YOUR_ACTUAL_GEMINI_API_KEY" --project-ref YOUR_PROJECT_REF
 ```
 
 **ÖNEMLİ:** Edge Function deploy edildikten sonra `.env.local` dosyasından `API_KEY`'i silin!
 
 ```bash
 # .env.local dosyasını düzenle
-# SİL: API_KEY=AIzaSyDv07rr9WgrVJ_nEgEwMxhR9GVuECzqybo
+# SİL: API_KEY=your_old_api_key_here
 ```
 
 #### C. Test Et
@@ -132,7 +132,7 @@ Remove-Item utils/encryption.ts
 
 ```env
 # SİL - Artık Edge Function kullanıyor
-# API_KEY=AIzaSyDv...
+# API_KEY=your_api_key_here...
 
 # SİL - Artık pgcrypto kullanıyor
 # VITE_ENCRYPTION_KEY=abc123...

@@ -32,7 +32,7 @@
 #### Tespit:
 ```bash
 # Build çıktısında API key açıkça görülüyor:
-dist/assets/geminiService-DbeArirH.js: apiKey:"AIzaSyDv07rr9WgrVJ_nEgEwMxhR9GVuECzqybo"
+dist/assets/geminiService-DbeArirH.js: apiKey:"AIzaSy***REDACTED***"
 ```
 
 #### Risk Analizi:

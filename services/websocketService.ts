@@ -8,6 +8,8 @@ class WebSocketService {
   private listeners: Set<MessageListener> = new Set();
   private reconnectTimeout: any = null;
   private broadcastChannel: BroadcastChannel | null = null;
+  private reconnectAttempts: number = 0;
+  private readonly maxReconnectDelay: number = 30000; // 30 seconds max
   
   // Using echo.websocket.org for demonstration of socket connection state.
   // Real broadcasting is simulated via BroadcastChannel API for multi-tab experience in this demo environment.
@@ -35,6 +37,8 @@ class WebSocketService {
 
       this.socket.onopen = () => {
         console.log('WebSocket Service: Connected');
+        // Reset reconnect attempts on successful connection
+        this.reconnectAttempts = 0;
         if (this.reconnectTimeout) {
           clearTimeout(this.reconnectTimeout);
           this.reconnectTimeout = null;
@@ -100,11 +104,16 @@ class WebSocketService {
   private attemptReconnect() {
     if (this.reconnectTimeout) return;
     
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max)
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
+    
+    console.log(`WebSocket Service: Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1})`);
+    
     this.reconnectTimeout = setTimeout(() => {
-      console.log('WebSocket Service: Attempting reconnect...');
+      this.reconnectAttempts++;
       this.connect();
       this.reconnectTimeout = null;
-    }, 5000);
+    }, delay);
   }
 
   disconnect() {

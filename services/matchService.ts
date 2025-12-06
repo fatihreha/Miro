@@ -15,64 +15,212 @@ export class MatchService {
     private activeSubscriptions: Map<string, any> = new Map();
 
     /**
-     * Record a swipe action
+     * Record a swipe action with server-side validation and race condition handling
      */
     async swipeUser(
         swiperId: string,
         swipedId: string,
         action: 'like' | 'pass' | 'superlike'
-    ): Promise<{ matched: boolean; matchData?: any }> {
+    ): Promise<{ success: boolean; matched: boolean; matchData?: any; error?: string }> {
         try {
-            // Record the swipe
+            // Step 1: Server-side daily limit check (prevent client-side bypass)
+            if (!await this.checkSwipeLimit(swiperId)) {
+                return { 
+                    success: false, 
+                    matched: false, 
+                    error: 'Daily swipe limit reached. Upgrade to Premium for unlimited swipes.' 
+                };
+            }
+
+            // Step 2: Check if already swiped (prevent duplicate swipes)
+            const { data: existingSwipe } = await supabase
+                .from('swipes')
+                .select('id, action')
+                .eq('swiper_id', swiperId)
+                .eq('swiped_id', swipedId)
+                .maybeSingle();
+
+            if (existingSwipe) {
+                console.log('Already swiped:', existingSwipe);
+                return { 
+                    success: false, 
+                    matched: false, 
+                    error: 'You already swiped this user' 
+                };
+            }
+
+            // Step 3: Generate unique swipe ID (idempotency)
+            const swipeId = `swipe_${swiperId}_${swipedId}_${Date.now()}`;
+
+            // Step 4: Record the swipe
             const { data: swipeData, error: swipeError } = await supabase
                 .from('swipes')
                 .insert({
+                    id: swipeId,
                     swiper_id: swiperId,
                     swiped_id: swipedId,
-                    action: action
+                    action: action,
+                    created_at: new Date().toISOString()
                 })
                 .select()
                 .single();
 
             if (swipeError) {
-                console.error('Error recording swipe:', error);
+                console.error('Error recording swipe:', swipeError);
+                
+                // Check if duplicate key error
+                if (swipeError.code === '23505') {
+                    return { 
+                        success: false, 
+                        matched: false, 
+                        error: 'Swipe already recorded' 
+                    };
+                }
+                
                 this.saveLocalSwipe(swiperId, swipedId, action);
-                return { matched: false };
+                return { success: false, matched: false, error: 'Failed to record swipe' };
             }
 
-            // Check if this created a match (only for likes)
+            // Step 5: Decrement swipe count (server-side)
+            await this.decrementSwipeCount(swiperId);
+
+            // Step 6: Check if this created a match (only for likes)
             if (action === 'like' || action === 'superlike') {
-                // Check if the other user also liked us
-                const { data: mutualLike, error: checkError } = await supabase
-                    .from('swipes')
-                    .select('*')
-                    .eq('swiper_id', swipedId)
-                    .eq('swiped_id', swiperId)
-                    .eq('action', 'like')
-                    .single();
-
-                if (mutualLike && !checkError) {
-                    // Mutual like! Check if match already exists
-                    const { data: existingMatch } = await supabase
-                        .from('matches')
-                        .select('*')
-                        .or(`and(user1_id.eq.${swiperId},user2_id.eq.${swipedId}),and(user1_id.eq.${swipedId},user2_id.eq.${swiperId})`)
-                        .single();
-
-                    if (!existingMatch) {
-                        // The database trigger should have created it, but if not, create manually
-                        const matchData = await this.createMatch(swiperId, swipedId);
-                        return { matched: true, matchData };
-                    } else {
-                        return { matched: true, matchData: existingMatch };
-                    }
+                const matchResult = await this.checkAndCreateMatch(swiperId, swipedId);
+                
+                if (matchResult.matched) {
+                    return { 
+                        success: true, 
+                        matched: true, 
+                        matchData: matchResult.matchData 
+                    };
                 }
             }
 
-            return { matched: false };
-        } catch (error) {
+            return { success: true, matched: false };
+        } catch (error: any) {
             console.error('Swipe error:', error);
             this.saveLocalSwipe(swiperId, swipedId, action);
+            return { 
+                success: false, 
+                matched: false, 
+                error: error.message || 'Unexpected error' 
+            };
+        }
+    }
+
+    /**
+     * Check daily swipe limit (server-side validation)
+     */
+    private async checkSwipeLimit(userId: string): Promise<boolean> {
+        try {
+            const { data: user, error } = await supabase
+                .from('users')
+                .select('is_premium, daily_swipes, last_swipe_reset')
+                .eq('id', userId)
+                .single();
+
+            if (error || !user) {
+                console.error('Failed to check swipe limit:', error);
+                return false; // Fail safe - don't allow if can't verify
+            }
+
+            // Premium users have unlimited swipes
+            if (user.is_premium) {
+                return true;
+            }
+
+            // Reset swipes if last reset was yesterday
+            const lastReset = user.last_swipe_reset ? new Date(user.last_swipe_reset) : null;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            if (!lastReset || lastReset < today) {
+                // Reset swipes for new day
+                await supabase
+                    .from('users')
+                    .update({ 
+                        daily_swipes: 10, 
+                        last_swipe_reset: today.toISOString() 
+                    })
+                    .eq('id', userId);
+                
+                return true;
+            }
+
+            // Check if user has swipes remaining
+            return (user.daily_swipes || 0) > 0;
+        } catch (error) {
+            console.error('Swipe limit check error:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Decrement swipe count (server-side)
+     */
+    private async decrementSwipeCount(userId: string): Promise<void> {
+        try {
+            await supabase.rpc('decrement_daily_swipes', { user_id: userId });
+        } catch (error) {
+            console.error('Failed to decrement swipe count:', error);
+        }
+    }
+
+    /**
+     * Check for mutual like and create match (with race condition handling)
+     */
+    private async checkAndCreateMatch(
+        userId1: string,
+        userId2: string
+    ): Promise<{ matched: boolean; matchData?: any }> {
+        try {
+            // Check if the other user also liked us
+            const { data: mutualLike, error: checkError } = await supabase
+                .from('swipes')
+                .select('id, action')
+                .eq('swiper_id', userId2)
+                .eq('swiped_id', userId1)
+                .in('action', ['like', 'superlike'])
+                .maybeSingle();
+
+            if (!mutualLike || checkError) {
+                return { matched: false };
+            }
+
+            console.log('🎉 Mutual like detected!');
+
+            // Use database function to create match (handles race conditions via unique constraint)
+            const { data: matchData, error: matchError } = await supabase
+                .rpc('create_match_if_not_exists', {
+                    p_user1_id: userId1,
+                    p_user2_id: userId2
+                })
+                .single();
+
+            if (matchError) {
+                console.error('Match creation error:', matchError);
+                
+                // Might already exist (race condition) - fetch it
+                const { data: existingMatch } = await supabase
+                    .from('matches')
+                    .select('*')
+                    .or(`and(user1_id.eq.${userId1},user2_id.eq.${userId2}),and(user1_id.eq.${userId2},user2_id.eq.${userId1})`)
+                    .eq('status', 'active')
+                    .maybeSingle();
+
+                if (existingMatch) {
+                    return { matched: true, matchData: existingMatch };
+                }
+                
+                return { matched: false };
+            }
+
+            console.log('✅ Match created:', matchData?.id);
+            return { matched: true, matchData };
+            
+        } catch (error) {
+            console.error('Check and create match error:', error);
             return { matched: false };
         }
     }

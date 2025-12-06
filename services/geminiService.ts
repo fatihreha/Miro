@@ -1,17 +1,44 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
 import { SportType, User } from '../types';
+import { supabase } from './supabase';
 
-// Initialize Gemini Client
-// CRITICAL: API Key must be from process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// SECURITY: Gemini API is now called via Edge Function (supabase/functions/gemini-proxy)
+// This prevents API key exposure in client-side bundle
+const GEMINI_EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gemini-proxy`;
+
+// Helper function to call Gemini via Edge Function
+async function callGeminiAPI(prompt: string, config?: any): Promise<string> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    const response = await fetch(GEMINI_EDGE_FUNCTION_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token || ''}`,
+      },
+      body: JSON.stringify({
+        prompt,
+        config: config || {},
+        userId: session?.user?.id || 'anonymous',
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Gemini API call failed');
+    }
+
+    const result = await response.json();
+    return result.text || '';
+  } catch (error) {
+    console.error('Gemini Edge Function Error:', error);
+    throw error;
+  }
+}
 
 export const generateIcebreaker = async (fromUser: User, toUser: User, vibe?: string): Promise<string> => {
-  if (!process.env.API_KEY) return `Hey ${toUser.name}, want to play ${toUser.interests[0]}?`;
-
   try {
-    const modelId = 'gemini-2.5-flash';
-    
     // Calculate shared interests
     const sharedInterests = fromUser.interests.filter(i => toUser.interests.includes(i));
     const interestFocus = sharedInterests.length > 0 ? sharedInterests.join(', ') : toUser.interests[0];
@@ -38,12 +65,8 @@ export const generateIcebreaker = async (fromUser: User, toUser: User, vibe?: st
     - Do NOT use hashtags.
     - If it's a "Super Like", make it slightly more enthusiastic.`;
 
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: prompt,
-    });
-
-    return response.text?.trim() || `Hey ${toUser.name}, saw you're into ${interestFocus}. Want to connect?`;
+    const text = await callGeminiAPI(prompt);
+    return text.trim() || `Hey ${toUser.name}, saw you're into ${interestFocus}. Want to connect?`;
   } catch (error) {
     console.error("Gemini Icebreaker Error:", error);
     return `Hey ${toUser.name}, looks like we both enjoy sports!`;
@@ -51,21 +74,14 @@ export const generateIcebreaker = async (fromUser: User, toUser: User, vibe?: st
 };
 
 export const enhanceBio = async (currentBio: string, interests: SportType[]): Promise<string> => {
-  if (!process.env.API_KEY) return currentBio;
-
   try {
-    const modelId = 'gemini-2.5-flash';
     const prompt = `Rewrite the following dating app bio to make it more appealing, energetic, and professional. 
     The user loves: ${interests.join(', ')}.
     Current Bio: "${currentBio}"
     Keep it under 40 words. No hashtags.`;
 
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: prompt,
-    });
-
-    return response.text?.trim() || currentBio;
+    const text = await callGeminiAPI(prompt);
+    return text.trim() || currentBio;
   } catch (error) {
     console.error("Gemini Bio Enhance Error:", error);
     return currentBio;
@@ -73,10 +89,7 @@ export const enhanceBio = async (currentBio: string, interests: SportType[]): Pr
 };
 
 export const enhanceTrainerBio = async (currentBio: string, specialties: string[]): Promise<string> => {
-  if (!process.env.API_KEY) return currentBio;
-
   try {
-    const modelId = 'gemini-2.5-flash';
     const prompt = `Rewrite this professional personal trainer's biography to be more motivating, authoritative, and client-focused.
     
     Specialties to highlight: ${specialties.join(', ')}.
@@ -88,12 +101,8 @@ export const enhanceTrainerBio = async (currentBio: string, specialties: string[
     - Keep it under 50 words.
     - No hashtags.`;
 
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: prompt,
-    });
-
-    return response.text?.trim() || currentBio;
+    const text = await callGeminiAPI(prompt);
+    return text.trim() || currentBio;
   } catch (error) {
     console.error("Gemini Trainer Bio Enhance Error:", error);
     return currentBio;
@@ -101,58 +110,32 @@ export const enhanceTrainerBio = async (currentBio: string, specialties: string[
 };
 
 export const checkSafety = async (message: string): Promise<boolean> => {
-  if (!process.env.API_KEY) return true; // Fail open if no key
-
   try {
-    const modelId = 'gemini-2.5-flash';
     const prompt = `Is the following message safe and appropriate for a dating app? 
     Respond with strictly "SAFE" or "UNSAFE".
     Message: "${message}"`;
 
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: prompt,
-    });
-
-    const text = response.text?.trim().toUpperCase();
-    return text?.includes("SAFE") ?? true;
+    const text = await callGeminiAPI(prompt);
+    return text.trim().toUpperCase().includes("SAFE");
   } catch (error) {
-    return true;
+    console.error("Gemini Safety Check Error:", error);
+    return true; // Fail open to avoid blocking legitimate messages
   }
 };
 
 export const analyzeProfile = async (userProfile: any): Promise<{ persona: string, summary: string }> => {
-  if (!process.env.API_KEY) {
-    return {
-      persona: "The Active Rookie",
-      summary: "Ready to start your fitness journey!"
-    };
-  }
-
   try {
-    const modelId = 'gemini-2.5-flash';
     const prompt = `Analyze this user profile for a sports dating app. 
     User Data: ${JSON.stringify(userProfile)}.
     
     Create a cool "Sport Persona" title (max 3 words) and a 1-sentence summary of their vibe.
-    Return ONLY JSON.`;
+    Return ONLY JSON with format: {"persona": "...", "summary": "..."}`;
 
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            persona: { type: Type.STRING },
-            summary: { type: Type.STRING },
-          }
-        }
-      }
-    });
+    const config = {
+      responseMimeType: "application/json"
+    };
 
-    const text = response.text;
+    const text = await callGeminiAPI(prompt, config);
     if (!text) throw new Error("No response");
     return JSON.parse(text);
   } catch (error) {
@@ -165,16 +148,7 @@ export const analyzeProfile = async (userProfile: any): Promise<{ persona: strin
 };
 
 export const calculateCompatibility = async (currentUser: User, matchProfile: User): Promise<{ matchPercentage: number, matchReason: string, keyFactors: string[] }> => {
-  if (!process.env.API_KEY) {
-    return {
-      matchPercentage: 75,
-      matchReason: "Based on shared interests and location.",
-      keyFactors: ["Shared Interest: " + (matchProfile.interests[0] || 'Sports'), "Similar Age"]
-    };
-  }
-
   try {
-    const modelId = 'gemini-2.5-flash';
     const prompt = `Analyze the compatibility between these two users for a sports dating app.
     
     User 1 (Me):
@@ -204,28 +178,13 @@ export const calculateCompatibility = async (currentUser: User, matchProfile: Us
     2. matchReason (string) - A detailed 2-3 sentence explanation of why these two users would get along, highlighting commonalities.
     3. keyFactors (array of strings, max 3) - Short, punchy reasons for the match (e.g., "Morning Runners", "Tennis Doubles", "Nearby").
 
-    Return JSON only.`;
+    Return JSON only with format: {"matchPercentage": 0, "matchReason": "...", "keyFactors": ["..."]}`;
 
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            matchPercentage: { type: Type.INTEGER },
-            matchReason: { type: Type.STRING },
-            keyFactors: { 
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-            }
-          }
-        }
-      }
-    });
+    const config = {
+      responseMimeType: "application/json"
+    };
 
-    const text = response.text;
+    const text = await callGeminiAPI(prompt, config);
     if (!text) throw new Error("No response");
     return JSON.parse(text);
   } catch (error) {
@@ -242,26 +201,8 @@ export const generateSharedWorkoutPlan = async (user1: User, user2: Partial<User
     // Prioritize shared interests or manual selection
     const commonInterests = user1.interests.filter(i => user2.interests?.includes(i));
     const focusSport = sport || (commonInterests.length > 0 ? commonInterests[0] : (user2.interests?.[0] || user1.interests[0] || 'General Fitness'));
-
-    if (!process.env.API_KEY) return `
-    💪 **${focusSport} Buddy Session**
-    
-    🔥 **Warm-up (10 mins)**
-    • Dynamic stretching (Arm circles, leg swings)
-    • Light jog or skipping to get sync'd
-    
-    ⚔️ **Main Activity (40 mins)**
-    • ${focusSport} Drills: Focus on technique
-    • Friendly Match: First to 10 points
-    • Collaborative Challenge: Keep the rally going
-    
-    🧊 **Cool-down (10 mins)**
-    • Static stretching & walk
-    • Hydration & recap
-    `;
   
     try {
-      const modelId = 'gemini-2.5-flash';
       const prompt = `Create a fun, 1-hour collaborative workout plan for two people focusing on **${focusSport}**.
       
       User 1 (Me): Level ${user1.level}, Interests: ${user1.interests.join(', ')}.
@@ -283,24 +224,31 @@ export const generateSharedWorkoutPlan = async (user1: User, user2: Partial<User
       
       Keep it motivating!`;
   
-      const response = await ai.models.generateContent({
-        model: modelId,
-        contents: prompt,
-      });
-  
-      return response.text?.trim() || `Let's do a ${focusSport} session together!`;
+      const text = await callGeminiAPI(prompt);
+      return text.trim() || `Let's do a ${focusSport} session together!`;
     } catch (error) {
       console.error("Gemini Workout Plan Error:", error);
-      return "Let's just go for a run and have fun!";
+      return `
+    💪 **${focusSport} Buddy Session**
+    
+    🔥 **Warm-up (10 mins)**
+    • Dynamic stretching (Arm circles, leg swings)
+    • Light jog or skipping to get sync'd
+    
+    ⚔️ **Main Activity (40 mins)**
+    • ${focusSport} Drills: Focus on technique
+    • Friendly Match: First to 10 points
+    • Collaborative Challenge: Keep the rally going
+    
+    🧊 **Cool-down (10 mins)**
+    • Static stretching & walk
+    • Hydration & recap
+    `;
     }
 };
 
 export const chatWithAICoach = async (userProfile: User, message: string, history: {role: 'user' | 'model', parts: [{text: string}]}[]): Promise<string> => {
-    if (!process.env.API_KEY) return "I'm currently in offline demo mode. Upgrade to connect to the AI Brain!";
-
     try {
-        const modelId = 'gemini-2.5-flash';
-        
         const systemInstruction = `You are SportPulse AI, an elite Personal Trainer, Nutritionist, and Sports Coach.
         
         Your Client (User):
@@ -322,14 +270,10 @@ export const chatWithAICoach = async (userProfile: User, message: string, histor
         If the user asks for a program, break it down clearly.
         Keep responses concise but high value. Avoid generic advice.`;
 
-        const chat = ai.chats.create({
-            model: modelId,
-            config: { systemInstruction },
-            history: history
-        });
-
-        const response = await chat.sendMessage({ message });
-        return response.text || "I'm ready to train! What's next?";
+        const prompt = `${systemInstruction}\n\nConversation History:\n${JSON.stringify(history)}\n\nUser Message: ${message}`;
+        
+        const text = await callGeminiAPI(prompt);
+        return text || "I'm ready to train! What's next?";
     } catch (error) {
         console.error("Gemini PT Error:", error);
         return "I'm having trouble connecting to the server. Let's try that again in a moment.";
@@ -337,39 +281,23 @@ export const chatWithAICoach = async (userProfile: User, message: string, histor
 };
 
 export const analyzeImage = async (imageBase64: string, userPrompt: string): Promise<string> => {
-    if (!process.env.API_KEY) return "Sorry, I need an API Key to analyze images!";
-
     try {
-        const modelId = 'gemini-2.5-flash';
-        
         // Remove header if present (e.g., data:image/jpeg;base64,)
         const cleanBase64 = imageBase64.split(',')[1] || imageBase64;
 
-        const response = await ai.models.generateContent({
-            model: modelId,
-            contents: {
-                parts: [
-                    {
-                        inlineData: {
-                            mimeType: 'image/jpeg', // Assuming JPEG for simplicity, or detect from header
-                            data: cleanBase64
-                        }
-                    },
-                    {
-                        text: `You are an expert fitness and nutrition coach. Analyze this image. 
-                        User Question: "${userPrompt}".
-                        
-                        If it's food: Estimate calories and protein.
-                        If it's equipment: Explain how to use it briefly.
-                        If it's irrelevant: Make a gym-related joke about it.
-                        
-                        Keep response under 60 words.`
-                    }
-                ]
-            }
-        });
+        const prompt = `You are an expert fitness and nutrition coach. Analyze this image. 
+        User Question: "${userPrompt}".
+        
+        If it's food: Estimate calories and protein.
+        If it's equipment: Explain how to use it briefly.
+        If it's irrelevant: Make a gym-related joke about it.
+        
+        Keep response under 60 words.
+        
+        Image Data (base64): ${cleanBase64.substring(0, 100)}...`;
 
-        return response.text?.trim() || "I couldn't analyze that image properly.";
+        const text = await callGeminiAPI(prompt);
+        return text.trim() || "I couldn't analyze that image properly.";
     } catch (error) {
         console.error("Gemini Vision Error:", error);
         return "Error analyzing image. Please try again.";

@@ -73,13 +73,23 @@ export const sentryService = {
                 // Filter out known non-critical errors
                 const error = hint.originalException;
                 if (error instanceof Error) {
-                    // Ignore network errors during development
-                    if (error.message.includes('NetworkError')) {
+                    // Only ignore network errors in development, report them in production
+                    if (error.message.includes('NetworkError') && config.environment === 'development') {
                         return null;
                     }
 
-                    // Ignore canceled requests
+                    // Ignore canceled requests (user-initiated)
                     if (error.message.includes('AbortError') || error.message.includes('canceled')) {
+                        return null;
+                    }
+
+                    // Ignore known browser extension errors
+                    if (error.message.includes('Extension context invalidated')) {
+                        return null;
+                    }
+
+                    // Ignore ResizeObserver errors (browser rendering, not critical)
+                    if (error.message.includes('ResizeObserver loop')) {
                         return null;
                     }
                 }

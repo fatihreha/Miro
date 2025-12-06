@@ -164,7 +164,14 @@ export const Profile: React.FC = () => {
         }
     };
 
-    if (!user) return null;
+    // Show loading spinner instead of blank screen
+    if (!user) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <Loader2 className="animate-spin text-neon-blue" size={48} />
+            </div>
+        );
+    }
 
     // Define specific Gold frame styling if Premium
     const profileFrameClass = user.isPremium

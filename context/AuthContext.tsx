@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { User } from '../types';
 import { supabase } from '../services/supabase';
 import { userService } from '../services/userService';
@@ -17,46 +17,71 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const DAILY_SWIPE_LIMIT = 10;
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAY = 1000;
 
-// REAL AuthProvider - Connected to Supabase
+// REAL AuthProvider - Connected to Supabase with Production-Ready Error Handling
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<User | null>(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    
+    const isLoggingOut = useRef(false);
+    const profileFetchAttempts = useRef(0);
+    const refreshRetryCount = useRef(0);
 
     useEffect(() => {
-        // Check active session
+        // Check active session with retry logic
         const checkSession = async () => {
             try {
-                const { data: { session } } = await supabase.auth.getSession();
+                const { data: { session }, error } = await supabase.auth.getSession();
+                
+                if (error) {
+                    console.error("AuthContext: Session check error", error);
+                    await handleSessionError(error);
+                    return;
+                }
+                
                 if (session?.user) {
                     console.log("AuthContext: Session found", session.user.id);
-                    await fetchUserProfile(session.user.id);
+                    await fetchUserProfileWithRetry(session.user.id);
                 } else {
                     console.log("AuthContext: No session");
                     setIsLoading(false);
                 }
             } catch (error) {
-                console.error("AuthContext: Session check error", error);
+                console.error("AuthContext: Unexpected error in checkSession", error);
                 setIsLoading(false);
             }
         };
 
         checkSession();
 
-        // Listen for auth changes
+        // Listen for auth changes with enhanced error handling
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            console.log("AuthContext: Auth Change", event);
+            console.log("AuthContext: Auth Change", event, {
+                hasSession: !!session,
+                isLoggingOut: isLoggingOut.current
+            });
+
+            // Prevent race conditions during logout
+            if (isLoggingOut.current) {
+                console.log("AuthContext: Ignoring event during logout");
+                return;
+            }
+
             if (event === 'SIGNED_IN' && session?.user) {
-                // Set authenticated immediately to speed up UI response
                 setIsAuthenticated(true);
                 setIsLoading(false);
-                // Fetch profile in background
-                await fetchUserProfile(session.user.id);
+                await fetchUserProfileWithRetry(session.user.id);
             } else if (event === 'SIGNED_OUT') {
-                setUser(null);
-                setIsAuthenticated(false);
-                setIsLoading(false);
+                handleSignOut();
+            } else if (event === 'TOKEN_REFRESHED') {
+                console.log("AuthContext: Token refreshed successfully");
+                refreshRetryCount.current = 0;
+                if (session?.user) {
+                    await verifyProfileAccess(session.user.id);
+                }
             }
         });
 
@@ -65,58 +90,258 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, []);
 
-    const fetchUserProfile = async (userId: string) => {
+    /**
+     * Handle session errors (expired token, banned user, etc.)
+     */
+    const handleSessionError = async (error: any) => {
+        const errorMessage = error?.message || '';
+        
+        // Check if user is banned/suspended
+        if (errorMessage.includes('banned') || errorMessage.includes('suspended')) {
+            console.error("AuthContext: User account is banned or suspended");
+            setIsLoading(false);
+            alert('Your account has been suspended. Please contact support.');
+            await forceLogout();
+            return;
+        }
+
+        // Token refresh failed
+        if (errorMessage.includes('refresh') || errorMessage.includes('token')) {
+            console.error("AuthContext: Token refresh failed", error);
+            await handleTokenRefreshFailure();
+            return;
+        }
+
+        // Generic error - retry
+        if (refreshRetryCount.current < MAX_RETRY_ATTEMPTS) {
+            refreshRetryCount.current++;
+            console.log(`AuthContext: Retrying session check (${refreshRetryCount.current}/${MAX_RETRY_ATTEMPTS})`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * refreshRetryCount.current));
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+                await fetchUserProfileWithRetry(session.user.id);
+            }
+        } else {
+            console.error("AuthContext: Max retry attempts reached");
+            setIsLoading(false);
+            await forceLogout();
+        }
+    };
+
+    /**
+     * Handle token refresh failure with retry
+     */
+    const handleTokenRefreshFailure = async () => {
+        if (refreshRetryCount.current < MAX_RETRY_ATTEMPTS) {
+            refreshRetryCount.current++;
+            console.log(`AuthContext: Retrying token refresh (${refreshRetryCount.current}/${MAX_RETRY_ATTEMPTS})`);
+            
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * refreshRetryCount.current));
+            
+            try {
+                const { data: { session }, error } = await supabase.auth.refreshSession();
+                
+                if (!error && session) {
+                    console.log("AuthContext: Token refresh successful");
+                    refreshRetryCount.current = 0;
+                    return;
+                }
+            } catch (error) {
+                console.error("AuthContext: Token refresh retry failed", error);
+            }
+        }
+        
+        // All retries failed - force logout
+        console.error("AuthContext: Token refresh failed after all retries");
+        alert('Your session has expired. Please log in again.');
+        await forceLogout();
+    };
+
+    /**
+     * Fetch user profile with retry and race condition prevention
+     */
+    const fetchUserProfileWithRetry = async (userId: string, attempt: number = 1): Promise<void> => {
         try {
+            // Prevent infinite retry loops
+            if (attempt > MAX_RETRY_ATTEMPTS) {
+                console.error("AuthContext: Max profile fetch attempts reached");
+                profileFetchAttempts.current = 0;
+                await handleProfileFetchFailure(userId);
+                return;
+            }
+
+            profileFetchAttempts.current = attempt;
+            console.log(`AuthContext: Fetching profile (attempt ${attempt}) for userId: ${userId}`);
+
             let profile = await userService.getUserById(userId);
+            console.log("AuthContext: getUserById result:", profile ? "Found" : "NULL");
             
             if (!profile) {
-                console.warn("AuthContext: User profile not found for ID", userId, "- attempting to create");
+                console.warn("AuthContext: Profile not found, attempting to create");
+                profile = await createUserProfile(userId);
+                console.log("AuthContext: createUserProfile result:", profile ? "Created" : "NULL");
                 
-                // Get email from auth session
-                const { data: { session } } = await supabase.auth.getSession();
-                const userEmail = session?.user?.email || '';
-                
-                // Create minimal profile
-                const created = await userService.createProfile({
-                    id: userId,
-                    email: userEmail,
-                    name: userEmail.split('@')[0] || 'User',
-                    isTrainer: false,
-                    isPremium: false,
-                    interests: [],
-                    bio: '',
-                    location: '',
-                    level: 'Beginner',
-                    workoutTimePreference: 'Anytime'
-                } as User);
-                
-                if (created) {
-                    // Retry fetching the profile
-                    profile = await userService.getUserById(userId);
+                if (!profile) {
+                    // Retry after delay
+                    console.log(`AuthContext: Profile creation failed, retrying in ${RETRY_DELAY * attempt}ms`);
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+                    await fetchUserProfileWithRetry(userId, attempt + 1);
+                    return;
                 }
             }
+
+            // Double-check profile is valid
+            if (!profile || !profile.id) {
+                console.error("AuthContext: Profile is null or invalid");
+                throw new Error("Invalid profile data received");
+            }
+
+            // Check if user is banned
+            if ((profile as any).isBanned || (profile as any).status === 'banned') {
+                console.error("AuthContext: User is banned");
+                alert('Your account has been suspended. Please contact support.');
+                await forceLogout();
+                return;
+            }
+
+            console.log("AuthContext: Profile loaded successfully", profile.id);
+            setUser(profile);
+            setIsAuthenticated(true);
+            profileFetchAttempts.current = 0;
             
-            if (profile) {
-                setUser(profile);
-                setIsAuthenticated(true);
-            } else {
-                console.error("AuthContext: Could not create or fetch profile for", userId);
-                // Profile missing - redirect to onboarding
-                setUser(null);
-                setIsAuthenticated(false);
-                // Check if we're not already on onboarding/welcome/auth pages
-                const currentPath = window.location.hash.replace('#', '');
-                if (!currentPath.includes('onboarding') && !currentPath.includes('welcome') && !currentPath.includes('auth')) {
-                    console.log('AuthContext: Redirecting to onboarding due to missing profile');
-                    window.location.hash = '/onboarding';
-                }
-            }
         } catch (error) {
-            console.error("AuthContext: Fetch profile error", error);
-            setUser(null);
-            setIsAuthenticated(false);
+            console.error("AuthContext: Profile fetch error", error);
+            
+            // Network error - retry
+            if (attempt < MAX_RETRY_ATTEMPTS) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+                await fetchUserProfileWithRetry(userId, attempt + 1);
+            } else {
+                await handleProfileFetchFailure(userId);
+            }
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    /**
+     * Create user profile with proper error handling
+     */
+    const createUserProfile = async (userId: string): Promise<User | null> => {
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const userEmail = session?.user?.email || '';
+            
+            const profileData = {
+                id: userId,
+                email: userEmail,
+                name: userEmail.split('@')[0] || 'User',
+                isTrainer: false,
+                isPremium: false,
+                interests: [],
+                bio: '',
+                location: '',
+                level: 'Beginner',
+                workoutTimePreference: 'Anytime'
+            } as User;
+
+            const created = await userService.createProfile(profileData);
+            
+            if (created) {
+                // Verify profile was actually created
+                const verified = await userService.getUserById(userId);
+                return verified;
+            }
+            
+            return null;
+        } catch (error) {
+            console.error("AuthContext: Profile creation error", error);
+            return null;
+        }
+    };
+
+    /**
+     * Handle profile fetch failure
+     */
+    const handleProfileFetchFailure = async (userId: string) => {
+        console.error("AuthContext: Could not fetch or create profile");
+        
+        // Try one final time with direct query
+        try {
+            console.log('AuthContext: Final attempt to fetch profile');
+            const { data, error } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', userId)
+                .limit(1);
+            
+            if (data && data.length > 0) {
+                console.log('AuthContext: Final attempt successful!');
+                setUser(userService['formatUser'](data[0]));
+                setIsAuthenticated(true);
+                return;
+            }
+        } catch (finalError) {
+            console.error('AuthContext: Final attempt failed:', finalError);
+        }
+        
+        setUser(null);
+        setIsAuthenticated(false);
+        
+        // Redirect to onboarding
+        const currentPath = window.location.hash.replace('#', '');
+        if (!currentPath.includes('onboarding') && !currentPath.includes('welcome') && !currentPath.includes('auth')) {
+            console.log('AuthContext: Redirecting to onboarding due to profile failure');
+            window.location.hash = '/onboarding';
+        }
+    };
+
+    /**
+     * Verify profile is still accessible after token refresh
+     */
+    const verifyProfileAccess = async (userId: string) => {
+        try {
+            const profile = await userService.getUserById(userId);
+            if (!profile) {
+                console.warn("AuthContext: Profile no longer accessible after refresh");
+                await handleTokenRefreshFailure();
+            }
+        } catch (error) {
+            console.error("AuthContext: Profile verification failed", error);
+        }
+    };
+
+    /**
+     * Handle sign out event
+     */
+    const handleSignOut = () => {
+        console.log("AuthContext: Handling sign out");
+        setUser(null);
+        setIsAuthenticated(false);
+        setIsLoading(false);
+        isLoggingOut.current = false;
+    };
+
+    /**
+     * Force logout (used for error states)
+     */
+    const forceLogout = async () => {
+        try {
+            isLoggingOut.current = true;
+            await supabase.auth.signOut();
+            handleSignOut();
+            
+            // Preserve splash screen state
+            const hasSeenSplash = localStorage.getItem('hasSeenSplash');
+            localStorage.clear();
+            sessionStorage.clear();
+            if (hasSeenSplash) {
+                localStorage.setItem('hasSeenSplash', hasSeenSplash);
+            }
+            
+            window.location.href = window.location.origin + window.location.pathname + '#/welcome';
+        } catch (error) {
+            console.error("AuthContext: Force logout error", error);
         }
     };
 
@@ -133,9 +358,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const logout = async () => {
         try {
             console.log('AuthContext: Logout initiated');
+            isLoggingOut.current = true;
+            
             await supabase.auth.signOut();
-            setUser(null);
-            setIsAuthenticated(false);
+            handleSignOut();
             
             // Preserve hasSeenSplash when clearing storage
             const hasSeenSplash = localStorage.getItem('hasSeenSplash');
@@ -146,10 +372,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
             
             console.log('AuthContext: Redirecting to welcome');
-            // Force navigation to welcome page with full URL
             window.location.href = window.location.origin + window.location.pathname + '#/welcome';
         } catch (error) {
             console.error('Logout error:', error);
+            isLoggingOut.current = false;
+            // Force cleanup even if logout fails
+            handleSignOut();
         }
     };
 

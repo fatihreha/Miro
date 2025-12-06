@@ -1,11 +1,13 @@
 
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LayoutProvider } from './context/LayoutContext';
 import { Splash } from './components/ui/Splash';
+import { subscriptionService } from './services/subscriptionService';
+import { chatService } from './services/chatService';
 
 // Loading Spinner Component
 const PageLoader: React.FC = () => (
@@ -108,6 +110,28 @@ const App: React.FC = () => {
     localStorage.setItem('hasSeenSplash', 'true');
     setShowSplash(false);
   };
+
+  // ============================================
+  // PRODUCTION SAFETY: App Startup Hooks
+  // ============================================
+  useEffect(() => {
+    const initializeApp = async () => {
+      try {
+        // Retry failed payment syncs from previous sessions
+        await subscriptionService.checkAndRetryFailedSyncs();
+        
+        // Retry pending messages that failed to send
+        await chatService.retryPendingMessages();
+        
+        console.log('[App] Startup recovery completed');
+      } catch (error) {
+        console.error('[App] Startup recovery failed:', error);
+        // Don't block app startup even if recovery fails
+      }
+    };
+
+    initializeApp();
+  }, []);
 
   if (showSplash) {
     return <Splash onFinish={handleSplashFinish} />;

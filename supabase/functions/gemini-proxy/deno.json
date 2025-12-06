@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "lib": ["deno.window", "deno.ns", "esnext"],
+    "types": [],
+    "strict": true,
+    "noImplicitAny": true,
+    "skipLibCheck": true
+  },
+  "imports": {
+    "@google/generative-ai": "https://esm.sh/@google/generative-ai@0.21.0"
+  },
+  "tasks": {
+    "dev": "deno run --allow-net --allow-env index.ts"
+  }
+}

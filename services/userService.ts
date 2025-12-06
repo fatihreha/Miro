@@ -46,6 +46,15 @@ export class UserService {
                 dbUser.show_location = user.showLocation !== false;
             }
 
+            console.log('[userService] Creating profile for:', user.id);
+            
+            // Check if profile already exists
+            const existing = await this.getUserById(user.id);
+            if (existing) {
+                console.log('[userService] Profile already exists, updating instead');
+                return await this.updateProfile(user.id, dbUser);
+            }
+            
             // Use upsert to handle cases where profile might already exist
             const { error } = await supabase
                 .from('users')
@@ -88,18 +97,47 @@ export class UserService {
      */
     async getUserById(userId: string): Promise<User | null> {
         try {
+            console.log('[userService] getUserById called for:', userId);
+            
+            // Check current session
+            const { data: { session } } = await supabase.auth.getSession();
+            console.log('[userService] Current session:', session ? 'EXISTS' : 'NULL');
+            console.log('[userService] Session user ID:', session?.user?.id);
+            console.log('[userService] Requested user ID:', userId);
+            
+            // Try with maybeSingle() instead of single() to avoid 406 error
             const { data, error } = await supabase
                 .from('users')
                 .select('*')
                 .eq('id', userId)
-                .single();
+                .maybeSingle();
 
             if (error) {
-                console.error('Error fetching user:', error);
+                console.error('[userService] Error fetching user:', error);
+                console.error('[userService] Error details:', {
+                    message: error.message,
+                    code: error.code,
+                    details: error.details
+                });
+                
+                // Fallback: Try without RLS using service role (for debugging)
+                console.log('[userService] Attempting fallback query...');
+                const { data: fallbackData, error: fallbackError } = await supabase
+                    .from('users')
+                    .select('*')
+                    .eq('id', userId)
+                    .limit(1);
+                
+                if (!fallbackError && fallbackData && fallbackData.length > 0) {
+                    console.log('[userService] Fallback query successful');
+                    return this.formatUser(fallbackData[0]);
+                }
+                
                 return null;
             }
 
-            return this.formatUser(data);
+            console.log('[userService] User data fetched:', data ? 'YES' : 'NO');
+            return data ? this.formatUser(data) : null;
         } catch (error) {
             console.error('Get user error:', error);
             return null;

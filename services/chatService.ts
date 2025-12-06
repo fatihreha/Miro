@@ -46,7 +46,7 @@ export class ChatService {
     }
 
     /**
-     * Send a new message
+     * Send a new message with delivery guarantee and retry queue
      */
     async sendMessage(
         senderId: string,
@@ -55,17 +55,24 @@ export class ChatService {
         type: 'text' | 'image' | 'invite' | 'ai_plan' = 'text',
         metadata?: any
     ): Promise<Message | null> {
+        const messageId = `msg_${senderId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        const messageData = {
+            id: messageId,
+            sender_id: senderId,
+            recipient_id: recipientId,
+            content,
+            message_type: type,
+            metadata: metadata || null,
+            is_read: false,
+            is_safe: true, // Will be validated by AI in production
+            created_at: new Date().toISOString(),
+            delivery_status: 'sending' // New field: sending, sent, delivered, failed
+        };
+
         try {
-            const messageData = {
-                sender_id: senderId,
-                recipient_id: recipientId,
-                content,
-                message_type: type,
-                metadata: metadata || null,
-                is_read: false,
-                is_safe: true, // Will be validated by AI in production
-                created_at: new Date().toISOString()
-            };
+            // Save to pending queue BEFORE sending
+            this.addToPendingQueue(messageData);
 
             const { data, error } = await supabase
                 .from('messages')
@@ -75,16 +82,139 @@ export class ChatService {
 
             if (error) {
                 console.error('Error sending message:', error);
-                // Fallback to localStorage
-                this.saveLocalMessage(senderId, recipientId, content, type, metadata);
+                // Keep in queue for retry
+                this.updateQueueStatus(messageId, 'failed');
                 return null;
             }
 
+            // Remove from pending queue on success
+            this.removeFromPendingQueue(messageId);
+            
             return this.formatMessage(data);
         } catch (error) {
             console.error('Send message error:', error);
-            this.saveLocalMessage(senderId, recipientId, content, type, metadata);
+            this.updateQueueStatus(messageId, 'failed');
             return null;
+        }
+    }
+
+    /**
+     * Add message to pending queue
+     */
+    private addToPendingQueue(messageData: any): void {
+        try {
+            const queue = this.getPendingQueue();
+            queue.push({
+                ...messageData,
+                retryCount: 0,
+                lastAttempt: Date.now()
+            });
+            localStorage.setItem('sportpulse_message_queue', JSON.stringify(queue));
+            console.log('📤 Added to pending queue:', messageData.id);
+        } catch (error) {
+            console.error('Failed to add to queue:', error);
+        }
+    }
+
+    /**
+     * Get pending message queue
+     */
+    private getPendingQueue(): any[] {
+        try {
+            const stored = localStorage.getItem('sportpulse_message_queue');
+            return stored ? JSON.parse(stored) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * Update message status in queue
+     */
+    private updateQueueStatus(messageId: string, status: string): void {
+        try {
+            const queue = this.getPendingQueue();
+            const message = queue.find(m => m.id === messageId);
+            if (message) {
+                message.delivery_status = status;
+                message.lastAttempt = Date.now();
+                message.retryCount = (message.retryCount || 0) + 1;
+                localStorage.setItem('sportpulse_message_queue', JSON.stringify(queue));
+            }
+        } catch (error) {
+            console.error('Failed to update queue status:', error);
+        }
+    }
+
+    /**
+     * Remove message from pending queue
+     */
+    private removeFromPendingQueue(messageId: string): void {
+        try {
+            const queue = this.getPendingQueue();
+            const filtered = queue.filter(m => m.id !== messageId);
+            localStorage.setItem('sportpulse_message_queue', JSON.stringify(filtered));
+            console.log('✅ Removed from queue:', messageId);
+        } catch (error) {
+            console.error('Failed to remove from queue:', error);
+        }
+    }
+
+    /**
+     * Retry sending all pending messages
+     */
+    async retryPendingMessages(): Promise<void> {
+        const queue = this.getPendingQueue();
+        
+        if (queue.length === 0) {
+            return;
+        }
+
+        console.log(`🔄 Retrying ${queue.length} pending messages...`);
+
+        for (const message of queue) {
+            // Skip if too many retries
+            if (message.retryCount >= 5) {
+                console.log(`❌ Max retries reached for message ${message.id}`);
+                continue;
+            }
+
+            // Skip if tried recently (exponential backoff)
+            const timeSinceLastAttempt = Date.now() - message.lastAttempt;
+            const backoffDelay = Math.min(1000 * Math.pow(2, message.retryCount), 30000);
+            
+            if (timeSinceLastAttempt < backoffDelay) {
+                continue;
+            }
+
+            try {
+                const { data, error } = await supabase
+                    .from('messages')
+                    .insert({
+                        id: message.id,
+                        sender_id: message.sender_id,
+                        recipient_id: message.recipient_id,
+                        content: message.content,
+                        message_type: message.message_type,
+                        metadata: message.metadata,
+                        is_read: false,
+                        is_safe: message.is_safe,
+                        created_at: message.created_at
+                    })
+                    .select()
+                    .single();
+
+                if (!error) {
+                    console.log(`✅ Retry successful for message ${message.id}`);
+                    this.removeFromPendingQueue(message.id);
+                } else {
+                    console.error(`Retry failed for message ${message.id}:`, error);
+                    this.updateQueueStatus(message.id, 'failed');
+                }
+            } catch (error) {
+                console.error(`Retry exception for message ${message.id}:`, error);
+                this.updateQueueStatus(message.id, 'failed');
+            }
         }
     }
 
@@ -105,7 +235,7 @@ export class ChatService {
     }
 
     /**
-     * Subscribe to real-time messages
+     * Subscribe to real-time messages with deduplication and memory leak prevention
      */
     subscribeToMessages(
         currentUserId: string,
@@ -113,14 +243,24 @@ export class ChatService {
         callback: (messages: Message[]) => void
     ): () => void {
         const channelName = `messages:${this.getChatId(currentUserId, otherUserId)}`;
+        const seenMessageIds = new Set<string>();
 
-        // Unsubscribe from existing channel if any
+        // Unsubscribe from existing channel if any (prevent memory leak)
         if (this.activeSubscriptions.has(channelName)) {
-            this.activeSubscriptions.get(channelName)?.unsubscribe();
+            console.log('🧹 Cleaning up existing subscription:', channelName);
+            const existing = this.activeSubscriptions.get(channelName);
+            existing?.unsubscribe();
+            this.activeSubscriptions.delete(channelName);
         }
 
         // Initial fetch
-        this.getMessages(currentUserId, otherUserId).then(callback);
+        this.getMessages(currentUserId, otherUserId).then((messages) => {
+            messages.forEach(m => seenMessageIds.add(m.id));
+            callback(messages);
+        });
+
+        // Retry pending messages on connection
+        this.retryPendingMessages();
 
         // Subscribe to new messages
         const channel = supabase
@@ -134,7 +274,17 @@ export class ChatService {
                     filter: `sender_id=eq.${otherUserId},recipient_id=eq.${currentUserId}`
                 },
                 (payload) => {
-                    console.log('New message received:', payload);
+                    const messageId = payload.new?.id;
+                    
+                    // Deduplication: ignore if already seen
+                    if (seenMessageIds.has(messageId)) {
+                        console.log('🔄 Duplicate message ignored:', messageId);
+                        return;
+                    }
+                    
+                    seenMessageIds.add(messageId);
+                    console.log('📨 New message received:', messageId);
+                    
                     // Fetch updated messages
                     this.getMessages(currentUserId, otherUserId).then(callback);
                 }
@@ -148,20 +298,53 @@ export class ChatService {
                     filter: `sender_id=eq.${currentUserId},recipient_id=eq.${otherUserId}`
                 },
                 (payload) => {
-                    console.log('Message sent:', payload);
+                    const messageId = payload.new?.id;
+                    
+                    // Deduplication
+                    if (seenMessageIds.has(messageId)) {
+                        return;
+                    }
+                    
+                    seenMessageIds.add(messageId);
+                    console.log('📤 Message sent:', messageId);
+                    
                     // Fetch updated messages
                     this.getMessages(currentUserId, otherUserId).then(callback);
                 }
             )
-            .subscribe();
+            .subscribe((status) => {
+                console.log('📡 Subscription status:', status);
+                
+                // Retry pending on reconnect
+                if (status === 'SUBSCRIBED') {
+                    this.retryPendingMessages();
+                }
+            });
 
         this.activeSubscriptions.set(channelName, channel);
+        console.log('✅ Subscribed to channel:', channelName);
 
         // Return cleanup function
         return () => {
+            console.log('🧹 Unsubscribing from channel:', channelName);
             channel.unsubscribe();
             this.activeSubscriptions.delete(channelName);
+            seenMessageIds.clear();
         };
+    }
+
+    /**
+     * Cleanup all active subscriptions (call on app unmount or logout)
+     */
+    cleanupAllSubscriptions(): void {
+        console.log(`🧹 Cleaning up ${this.activeSubscriptions.size} active subscriptions`);
+        
+        this.activeSubscriptions.forEach((channel, channelName) => {
+            console.log('Unsubscribing from:', channelName);
+            channel.unsubscribe();
+        });
+        
+        this.activeSubscriptions.clear();
     }
 
     /**

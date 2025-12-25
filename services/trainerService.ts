@@ -91,11 +91,13 @@ export class TrainerService {
         price: number;
     }): Promise<{ success: boolean; booking?: any; error?: string }> {
         try {
+            const normalizedTime = this.normalizeTo24Hour(bookingData.scheduledTime);
+
             // Step 1: Check slot availability (prevent double booking)
             const isAvailable = await this.checkSlotAvailability(
                 bookingData.trainerId,
                 bookingData.scheduledDate,
-                bookingData.scheduledTime,
+                normalizedTime,
                 bookingData.durationMinutes || 60
             );
 
@@ -111,7 +113,7 @@ export class TrainerService {
             const isInWorkingHours = await this.verifyTrainerWorkingHours(
                 bookingData.trainerId,
                 bookingData.scheduledDate,
-                bookingData.scheduledTime
+                normalizedTime
             );
 
             if (!isInWorkingHours) {
@@ -132,10 +134,10 @@ export class TrainerService {
                     user_id: bookingData.userId,
                     trainer_id: bookingData.trainerId,
                     scheduled_date: bookingData.scheduledDate,
-                    scheduled_time: bookingData.scheduledTime,
+                    scheduled_time: normalizedTime,
                     duration_minutes: bookingData.durationMinutes || 60,
                     price: bookingData.price,
-                    status: 'pending', // Start as pending until payment
+                    status: 'upcoming',
                     payment_status: 'pending',
                     created_at: new Date().toISOString()
                 })
@@ -184,7 +186,7 @@ export class TrainerService {
                 .select('id, scheduled_time, duration_minutes')
                 .eq('trainer_id', trainerId)
                 .eq('scheduled_date', date)
-                .in('status', ['pending', 'upcoming', 'confirmed']);
+                .in('status', ['upcoming']);
 
             if (error) {
                 console.error('Error checking availability:', error);
@@ -256,20 +258,48 @@ export class TrainerService {
             }
 
             // Check time is within working hours
-            const [reqHour, reqMinute] = time.split(':').map(Number);
-            const requestedMinutes = reqHour * 60 + reqMinute;
-
-            const [startHour, startMinute] = dayAvailability.start.split(':').map(Number);
-            const startMinutes = startHour * 60 + startMinute;
-
-            const [endHour, endMinute] = dayAvailability.end.split(':').map(Number);
-            const endMinutes = endHour * 60 + endMinute;
+            const requestedMinutes = this.timeStringToMinutes(this.normalizeTo24Hour(time));
+            const startMinutes = this.timeStringToMinutes(this.normalizeTo24Hour(dayAvailability.start));
+            const endMinutes = this.timeStringToMinutes(this.normalizeTo24Hour(dayAvailability.end));
 
             return requestedMinutes >= startMinutes && requestedMinutes < endMinutes;
         } catch (error) {
             console.error('Working hours verification error:', error);
             return true; // Allow if check fails
         }
+    }
+
+    private timeStringToMinutes(time: string): number {
+        const [hourStr, minuteStr] = time.split(':');
+        const hour = parseInt(hourStr || '0', 10);
+        const minute = parseInt((minuteStr || '0').slice(0, 2), 10);
+        return hour * 60 + minute;
+    }
+
+    /**
+     * Normalize input time to 24h HH:MM format to align with Supabase TIME column
+     */
+    private normalizeTo24Hour(time: string): string {
+        // Handles "2:30 PM", "14:30", or already-normalized strings
+        const trimmed = time.trim();
+        const ampmMatch = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (ampmMatch) {
+            let hour = parseInt(ampmMatch[1], 10);
+            const minutes = ampmMatch[2];
+            const meridiem = ampmMatch[3].toUpperCase();
+            if (meridiem === 'PM' && hour !== 12) hour += 12;
+            if (meridiem === 'AM' && hour === 12) hour = 0;
+            return `${hour.toString().padStart(2, '0')}:${minutes}`;
+        }
+
+        const parts = trimmed.split(':');
+        if (parts.length >= 2) {
+            const hour = parts[0].padStart(2, '0');
+            const minutes = parts[1].slice(0, 2).padEnd(2, '0');
+            return `${hour}:${minutes}`;
+        }
+
+        return trimmed; // Fallback, should already be in HH:MM
     }
 
     /**

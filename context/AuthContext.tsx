@@ -2,30 +2,44 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { User } from '../types';
 import { supabase } from '../services/supabase';
 import { userService } from '../services/userService';
+import { pushNotificationService } from '../services/pushNotificationService';
+import { presenceService } from '../services/presenceService';
+import { notificationService } from '../services/notificationService';
+
+// Auth error types for better error handling
+export interface AuthError {
+    code: 'SESSION_EXPIRED' | 'ACCOUNT_BANNED' | 'PROFILE_ERROR' | 'NETWORK_ERROR' | 'UNKNOWN';
+    message: string;
+}
 
 interface AuthContextType {
     user: User | null;
     isAuthenticated: boolean;
     isLoading: boolean;
+    authError: AuthError | null;
     login: (userData: User) => Promise<void>;
     logout: () => Promise<void>;
     updateUser: (data: Partial<User>) => Promise<void>;
     reloadUser: () => Promise<void>;
     consumeSwipe: () => Promise<void>;
+    clearAuthError: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const DAILY_SWIPE_LIMIT = 10;
-const MAX_RETRY_ATTEMPTS = 3;
-const RETRY_DELAY = 1000;
+const MAX_RETRY_ATTEMPTS = 2; // Reduced from 3 for faster response
+const RETRY_DELAY = 300; // Reduced from 500 for faster response
 
 // REAL AuthProvider - Connected to Supabase with Production-Ready Error Handling
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<User | null>(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
-    
+    const [authError, setAuthError] = useState<AuthError | null>(null);
+
+    const clearAuthError = () => setAuthError(null);
+
     const isLoggingOut = useRef(false);
     const profileFetchAttempts = useRef(0);
     const refreshRetryCount = useRef(0);
@@ -35,13 +49,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const checkSession = async () => {
             try {
                 const { data: { session }, error } = await supabase.auth.getSession();
-                
+
                 if (error) {
                     console.error("AuthContext: Session check error", error);
                     await handleSessionError(error);
                     return;
                 }
-                
+
                 if (session?.user) {
                     console.log("AuthContext: Session found", session.user.id);
                     await fetchUserProfileWithRetry(session.user.id);
@@ -55,7 +69,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         };
 
-        checkSession();
+        // Global timeout - ensure loading never exceeds 5 seconds
+        const timeoutId = setTimeout(() => {
+            console.warn("AuthContext: Global timeout reached, forcing loading to stop");
+            setIsLoading(false);
+        }, 5000);
+
+        checkSession().finally(() => {
+            clearTimeout(timeoutId);
+        });
 
         // Listen for auth changes with enhanced error handling
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -71,8 +93,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             if (event === 'SIGNED_IN' && session?.user) {
-                setIsAuthenticated(true);
-                setIsLoading(false);
+                setIsLoading(true);
+                // Do not set isAuthenticated=true here, wait for profile fetch
                 await fetchUserProfileWithRetry(session.user.id);
             } else if (event === 'SIGNED_OUT') {
                 handleSignOut();
@@ -95,12 +117,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
      */
     const handleSessionError = async (error: any) => {
         const errorMessage = error?.message || '';
-        
+
         // Check if user is banned/suspended
         if (errorMessage.includes('banned') || errorMessage.includes('suspended')) {
             console.error("AuthContext: User account is banned or suspended");
             setIsLoading(false);
-            alert('Your account has been suspended. Please contact support.');
+            setAuthError({ code: 'ACCOUNT_BANNED', message: 'Your account has been suspended. Please contact support.' });
+            notificationService.showNotification('Account Suspended', { body: 'Please contact support for assistance.' });
             await forceLogout();
             return;
         }
@@ -135,12 +158,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (refreshRetryCount.current < MAX_RETRY_ATTEMPTS) {
             refreshRetryCount.current++;
             console.log(`AuthContext: Retrying token refresh (${refreshRetryCount.current}/${MAX_RETRY_ATTEMPTS})`);
-            
+
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * refreshRetryCount.current));
-            
+
             try {
                 const { data: { session }, error } = await supabase.auth.refreshSession();
-                
+
                 if (!error && session) {
                     console.log("AuthContext: Token refresh successful");
                     refreshRetryCount.current = 0;
@@ -150,10 +173,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 console.error("AuthContext: Token refresh retry failed", error);
             }
         }
-        
+
         // All retries failed - force logout
         console.error("AuthContext: Token refresh failed after all retries");
-        alert('Your session has expired. Please log in again.');
+        setAuthError({ code: 'SESSION_EXPIRED', message: 'Your session has expired. Please log in again.' });
+        notificationService.showNotification('Session Expired', { body: 'Please log in again.' });
         await forceLogout();
     };
 
@@ -175,18 +199,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             let profile = await userService.getUserById(userId);
             console.log("AuthContext: getUserById result:", profile ? "Found" : "NULL");
-            
+
             if (!profile) {
-                console.warn("AuthContext: Profile not found, attempting to create");
-                profile = await createUserProfile(userId);
-                console.log("AuthContext: createUserProfile result:", profile ? "Created" : "NULL");
-                
+                // Wait briefly to give registration flow time to create the profile
+                // This prevents race conditions where AuthContext tries to create a generic profile
+                // while Auth.tsx is creating the detailed one.
+                if (attempt === 1) {
+                    console.log("AuthContext: Profile not found, waiting for potential registration...");
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                    profile = await userService.getUserById(userId);
+                }
+
                 if (!profile) {
-                    // Retry after delay
-                    console.log(`AuthContext: Profile creation failed, retrying in ${RETRY_DELAY * attempt}ms`);
-                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
-                    await fetchUserProfileWithRetry(userId, attempt + 1);
-                    return;
+                    console.warn("AuthContext: Profile still not found, attempting to create");
+                    profile = await createUserProfile(userId);
+                    console.log("AuthContext: createUserProfile result:", profile ? "Created" : "NULL");
+
+                    if (!profile) {
+                        // Retry after delay
+                        console.log(`AuthContext: Profile creation failed, retrying in ${RETRY_DELAY * attempt}ms`);
+                        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+                        await fetchUserProfileWithRetry(userId, attempt + 1);
+                        return;
+                    }
                 }
             }
 
@@ -199,7 +234,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Check if user is banned
             if ((profile as any).isBanned || (profile as any).status === 'banned') {
                 console.error("AuthContext: User is banned");
-                alert('Your account has been suspended. Please contact support.');
+                setAuthError({ code: 'ACCOUNT_BANNED', message: 'Your account has been suspended. Please contact support.' });
+                notificationService.showNotification('Account Suspended', { body: 'Please contact support for assistance.' });
                 await forceLogout();
                 return;
             }
@@ -208,10 +244,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(profile);
             setIsAuthenticated(true);
             profileFetchAttempts.current = 0;
-            
+
+            // Initialize push notifications after successful login
+            try {
+                await pushNotificationService.initialize(profile.id);
+            } catch (pushError) {
+                console.warn('AuthContext: Push notification initialization failed:', pushError);
+            }
+
+            // Initialize presence service
+            try {
+                await presenceService.initialize(profile.id);
+            } catch (presenceError) {
+                console.warn('AuthContext: Presence initialization failed:', presenceError);
+            }
+
         } catch (error) {
             console.error("AuthContext: Profile fetch error", error);
-            
+
             // Network error - retry
             if (attempt < MAX_RETRY_ATTEMPTS) {
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
@@ -226,33 +276,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     /**
      * Create user profile with proper error handling
+     * Uses OAuth metadata (name, avatar) when available from social logins
      */
     const createUserProfile = async (userId: string): Promise<User | null> => {
         try {
             const { data: { session } } = await supabase.auth.getSession();
             const userEmail = session?.user?.email || '';
-            
+            const userMetadata = session?.user?.user_metadata || {};
+
+            // Use OAuth provider data if available (Google/Apple provide these)
+            const displayName = userMetadata.full_name || userMetadata.name || userEmail.split('@')[0] || 'User';
+            const avatarUrl = userMetadata.avatar_url || userMetadata.picture || '';
+
             const profileData = {
                 id: userId,
                 email: userEmail,
-                name: userEmail.split('@')[0] || 'User',
+                name: displayName,
+                avatarUrl: avatarUrl,
+                age: 0, // Will be updated during onboarding
                 isTrainer: false,
                 isPremium: false,
-                interests: [],
+                interests: [] as any[],
                 bio: '',
                 location: '',
-                level: 'Beginner',
-                workoutTimePreference: 'Anytime'
-            } as User;
+                level: 'Beginner' as const,
+                workoutTimePreference: 'Anytime' as const  // Must match DB constraint
+            };
 
             const created = await userService.createProfile(profileData);
-            
+
             if (created) {
                 // Verify profile was actually created
                 const verified = await userService.getUserById(userId);
                 return verified;
             }
-            
+
             return null;
         } catch (error) {
             console.error("AuthContext: Profile creation error", error);
@@ -265,7 +323,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
      */
     const handleProfileFetchFailure = async (userId: string) => {
         console.error("AuthContext: Could not fetch or create profile");
-        
+
         // Try one final time with direct query
         try {
             console.log('AuthContext: Final attempt to fetch profile');
@@ -274,21 +332,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .select('*')
                 .eq('id', userId)
                 .limit(1);
-            
+
             if (data && data.length > 0) {
                 console.log('AuthContext: Final attempt successful!');
                 setUser(userService['formatUser'](data[0]));
                 setIsAuthenticated(true);
+                setIsLoading(false); // Important: stop loading
                 return;
             }
         } catch (finalError) {
             console.error('AuthContext: Final attempt failed:', finalError);
         }
-        
+
+        // Profile doesn't exist - set loading to false and show auth error
         setUser(null);
         setIsAuthenticated(false);
-        
-        // Redirect to onboarding
+        setIsLoading(false); // Critical: stop loading spinner
+        setAuthError({
+            code: 'PROFILE_ERROR',
+            message: 'Could not load your profile. Please try again or contact support.'
+        });
+
+        // Redirect to onboarding to create profile
         const currentPath = window.location.hash.replace('#', '');
         if (!currentPath.includes('onboarding') && !currentPath.includes('welcome') && !currentPath.includes('auth')) {
             console.log('AuthContext: Redirecting to onboarding due to profile failure');
@@ -330,7 +395,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             isLoggingOut.current = true;
             await supabase.auth.signOut();
             handleSignOut();
-            
+
             // Preserve splash screen state
             const hasSeenSplash = localStorage.getItem('hasSeenSplash');
             localStorage.clear();
@@ -338,7 +403,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (hasSeenSplash) {
                 localStorage.setItem('hasSeenSplash', hasSeenSplash);
             }
-            
+
             window.location.href = window.location.origin + window.location.pathname + '#/welcome';
         } catch (error) {
             console.error("AuthContext: Force logout error", error);
@@ -359,10 +424,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             console.log('AuthContext: Logout initiated');
             isLoggingOut.current = true;
-            
+
+            // Remove push notification token before logging out
+            if (user?.id) {
+                try {
+                    await pushNotificationService.removeToken(user.id);
+                } catch (pushError) {
+                    console.warn('AuthContext: Failed to remove push token:', pushError);
+                }
+            }
+
             await supabase.auth.signOut();
             handleSignOut();
-            
+
             // Preserve hasSeenSplash when clearing storage
             const hasSeenSplash = localStorage.getItem('hasSeenSplash');
             localStorage.clear();
@@ -370,7 +444,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (hasSeenSplash) {
                 localStorage.setItem('hasSeenSplash', hasSeenSplash);
             }
-            
+
             console.log('AuthContext: Redirecting to welcome');
             window.location.href = window.location.origin + window.location.pathname + '#/welcome';
         } catch (error) {
@@ -393,7 +467,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const reloadUser = async () => {
         if (user) {
-            await fetchUserProfile(user.id);
+            await fetchUserProfileWithRetry(user.id);
         }
     };
 
@@ -411,11 +485,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             user,
             isAuthenticated,
             isLoading,
+            authError,
             login,
             logout,
             updateUser,
             reloadUser,
-            consumeSwipe
+            consumeSwipe,
+            clearAuthError
         }}>
             {children}
         </AuthContext.Provider>

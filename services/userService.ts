@@ -1,5 +1,8 @@
 import { supabase, storageHelpers } from './supabase';
 import { User, SportType } from '../types';
+import { rateLimiter, RATE_LIMITS } from '../utils/rateLimit';
+import { compressImage, compressImages } from '../utils/imageCompression';
+import { cacheManager, CACHE_KEYS, CACHE_TTL } from '../utils/cacheManager';
 
 /**
  * User Profile Service
@@ -28,7 +31,7 @@ export class UserService {
                 avatar_url: user.avatarUrl || null,
                 interests: user.interests || [],
                 skill_level: user.level || 'Beginner',
-                workout_time_preference: user.workoutTimePreference || 'Anytime',
+                workout_time_preference: user.workoutTimePreference ?? 'Anytime', // Use ?? for proper null/undefined handling
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
                 // Default values
@@ -47,14 +50,14 @@ export class UserService {
             }
 
             console.log('[userService] Creating profile for:', user.id);
-            
+
             // Check if profile already exists
             const existing = await this.getUserById(user.id);
             if (existing) {
                 console.log('[userService] Profile already exists, updating instead');
                 return await this.updateProfile(user.id, dbUser);
             }
-            
+
             // Use upsert to handle cases where profile might already exist
             const { error } = await supabase
                 .from('users')
@@ -62,20 +65,28 @@ export class UserService {
 
             if (error) {
                 console.error('Error creating profile:', error.message, error.details, error.hint);
-                // If it's a column error, try with minimal required fields
-                if (error.message?.includes('column') || error.code === '42703') {
-                    console.log('Retrying with minimal fields...');
+                // If it's a column error OR constraint violation, try with minimal required fields
+                const shouldRetryMinimal =
+                    error.message?.includes('column') ||
+                    error.message?.includes('constraint') ||
+                    error.code === '42703' ||
+                    error.code === '23514'; // check constraint violation
+
+                if (shouldRetryMinimal) {
+                    console.log('Retrying with minimal fields due to:', error.message);
                     const minimalUser = {
                         id: user.id,
                         email: user.email,
                         name: user.name,
+                        workout_time_preference: 'Anytime', // Required by DB constraint
+                        skill_level: 'Beginner',
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     };
                     const { error: minError } = await supabase
                         .from('users')
                         .upsert(minimalUser, { onConflict: 'id' });
-                    
+
                     if (minError) {
                         console.error('Minimal profile creation also failed:', minError);
                         return false;
@@ -94,17 +105,24 @@ export class UserService {
 
     /**
      * Get user by ID
+     * Includes caching for improved performance (5 minute TTL)
      */
     async getUserById(userId: string): Promise<User | null> {
+        // Check cache first
+        const cacheKey = CACHE_KEYS.USER(userId);
+        const cached = cacheManager.get<User>(cacheKey);
+        if (cached) {
+            console.log('[userService] Cache hit for user:', userId);
+            return cached;
+        }
+
         try {
-            console.log('[userService] getUserById called for:', userId);
-            
+            console.log('[userService] Cache miss, fetching user:', userId);
+
             // Check current session
             const { data: { session } } = await supabase.auth.getSession();
             console.log('[userService] Current session:', session ? 'EXISTS' : 'NULL');
-            console.log('[userService] Session user ID:', session?.user?.id);
-            console.log('[userService] Requested user ID:', userId);
-            
+
             // Try with maybeSingle() instead of single() to avoid 406 error
             const { data, error } = await supabase
                 .from('users')
@@ -114,12 +132,7 @@ export class UserService {
 
             if (error) {
                 console.error('[userService] Error fetching user:', error);
-                console.error('[userService] Error details:', {
-                    message: error.message,
-                    code: error.code,
-                    details: error.details
-                });
-                
+
                 // Fallback: Try without RLS using service role (for debugging)
                 console.log('[userService] Attempting fallback query...');
                 const { data: fallbackData, error: fallbackError } = await supabase
@@ -127,17 +140,25 @@ export class UserService {
                     .select('*')
                     .eq('id', userId)
                     .limit(1);
-                
+
                 if (!fallbackError && fallbackData && fallbackData.length > 0) {
                     console.log('[userService] Fallback query successful');
-                    return this.formatUser(fallbackData[0]);
+                    const user = this.formatUser(fallbackData[0]);
+                    cacheManager.set(cacheKey, user, CACHE_TTL.USER_PROFILE);
+                    return user;
                 }
-                
+
                 return null;
             }
 
-            console.log('[userService] User data fetched:', data ? 'YES' : 'NO');
-            return data ? this.formatUser(data) : null;
+            if (data) {
+                const user = this.formatUser(data);
+                // Cache the result
+                cacheManager.set(cacheKey, user, CACHE_TTL.USER_PROFILE);
+                return user;
+            }
+
+            return null;
         } catch (error) {
             console.error('Get user error:', error);
             return null;
@@ -212,6 +233,17 @@ export class UserService {
             if (updates.avatarUrl) dbUpdates.avatar_url = updates.avatarUrl;
             if (updates.gender) dbUpdates.gender = updates.gender;
 
+            // Multi-photo support
+            if (updates.photos !== undefined) {
+                dbUpdates.photos = updates.photos;
+                // First photo = avatar
+                dbUpdates.avatar_url = updates.photos[0] || null;
+            }
+            // Backward compatibility: if avatarUrl set without photos
+            if (updates.avatarUrl && !updates.photos) {
+                dbUpdates.avatar_url = updates.avatarUrl;
+            }
+
             dbUpdates.updated_at = new Date().toISOString();
 
             const { error } = await supabase
@@ -233,14 +265,24 @@ export class UserService {
 
     /**
      * Upload profile photo
+     * Includes rate limiting and automatic image compression
      */
     async uploadPhoto(userId: string, file: File): Promise<string | null> {
+        // Rate limiting check
+        if (!rateLimiter.canMakeRequest(`upload_${userId}`, RATE_LIMITS.UPLOAD)) {
+            console.warn('Rate limit exceeded for uploads');
+            return null;
+        }
+
         try {
-            const fileExt = file.name.split('.').pop();
+            // Compress image before upload
+            const compressedFile = await compressImage(file);
+
+            const fileExt = compressedFile.name.split('.').pop() || 'jpg';
             const fileName = `${userId}-${Date.now()}.${fileExt}`;
             const filePath = `avatars/${fileName}`;
 
-            const { data, error } = await storageHelpers.uploadFile('avatars', filePath, file);
+            const { data, error } = await storageHelpers.uploadFile('avatars', filePath, compressedFile);
 
             if (error) {
                 console.error('Error uploading photo:', error);
@@ -256,6 +298,68 @@ export class UserService {
         } catch (error) {
             console.error('Upload photo error:', error);
             return null;
+        }
+    }
+
+    /**
+     * Delete photo
+     */
+    /**
+     * Upload multiple photos (for multi-photo profile)
+     * Includes automatic image compression
+     */
+    async uploadPhotos(userId: string, files: File[]): Promise<string[]> {
+        const uploadedUrls: string[] = [];
+
+        // Compress all images first
+        const compressedFiles = await compressImages(files);
+
+        for (const file of compressedFiles) {
+            try {
+                const fileExt = file.name.split('.').pop() || 'jpg';
+                const fileName = `${userId}-${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+                const filePath = `avatars/${fileName}`;
+
+                const { error } = await storageHelpers.uploadFile('avatars', filePath, file);
+
+                if (error) {
+                    console.error('Photo upload failed:', error);
+                    continue;
+                }
+
+                const publicUrl = storageHelpers.getPublicUrl('avatars', filePath);
+                uploadedUrls.push(publicUrl);
+            } catch (err) {
+                console.error('Error uploading photo:', err);
+            }
+        }
+
+        return uploadedUrls;
+    }
+
+    /**
+     * Update photos array in database
+     */
+    async updatePhotos(userId: string, photos: string[]): Promise<boolean> {
+        try {
+            const { error } = await supabase
+                .from('users')
+                .update({
+                    photos: photos,
+                    avatar_url: photos[0] || null, // First photo = avatar
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', userId);
+
+            if (error) {
+                console.error('Error updating photos:', error);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Update photos error:', error);
+            return false;
         }
     }
 
@@ -333,6 +437,126 @@ export class UserService {
     }
 
     /**
+     * Update privacy settings
+     */
+    async updatePrivacySettings(userId: string, settings: {
+        incognitoMode?: boolean;
+        ghostMode?: boolean;
+        widgetStyle?: 'daily' | 'stats' | 'lockin';
+    }): Promise<boolean> {
+        try {
+            const updates: Record<string, any> = {};
+
+            if (settings.incognitoMode !== undefined) {
+                updates.incognito_mode = settings.incognitoMode;
+            }
+            if (settings.ghostMode !== undefined) {
+                updates.ghost_mode = settings.ghostMode;
+            }
+            if (settings.widgetStyle !== undefined) {
+                updates.widget_style = settings.widgetStyle;
+            }
+
+            const { error } = await supabase
+                .from('users')
+                .update(updates)
+                .eq('id', userId);
+
+            if (error) {
+                console.error('Update privacy settings error:', error);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Update privacy settings error:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Get privacy settings
+     */
+    async getPrivacySettings(userId: string): Promise<{
+        incognitoMode: boolean;
+        ghostMode: boolean;
+        widgetStyle: 'daily' | 'stats' | 'lockin';
+    } | null> {
+        try {
+            const { data, error } = await supabase
+                .from('users')
+                .select('incognito_mode, ghost_mode, widget_style')
+                .eq('id', userId)
+                .single();
+
+            if (error) {
+                console.error('Get privacy settings error:', error);
+                return null;
+            }
+
+            return {
+                incognitoMode: data.incognito_mode || false,
+                ghostMode: data.ghost_mode || false,
+                widgetStyle: data.widget_style || 'daily'
+            };
+        } catch (error) {
+            console.error('Get privacy settings error:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Request data export
+     */
+    async requestDataExport(userId: string): Promise<boolean> {
+        try {
+            const { error } = await supabase
+                .from('data_requests')
+                .insert({
+                    user_id: userId,
+                    request_type: 'export',
+                    status: 'pending',
+                    created_at: new Date().toISOString()
+                });
+
+            if (error) {
+                console.error('Request data export error:', error);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Request data export error:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Mark account for deletion
+     */
+    async deleteAccount(userId: string): Promise<boolean> {
+        try {
+            const { error } = await supabase
+                .from('users')
+                .update({
+                    deleted_at: new Date().toISOString(),
+                    is_deleted: true
+                })
+                .eq('id', userId);
+
+            if (error) {
+                console.error('Delete account error:', error);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Delete account error:', error);
+            return false;
+        }
+    }
+
+    /**
      * Format database user to app User type
      */
     private formatUser(dbUser: any): User {
@@ -344,13 +568,14 @@ export class UserService {
             gender: dbUser.gender,
             bio: dbUser.bio,
             location: dbUser.location,
-            avatarUrl: dbUser.avatar_url,
+            avatarUrl: dbUser.avatar_url || '',
+            photos: dbUser.photos || (dbUser.avatar_url ? [dbUser.avatar_url] : []), // Fallback for backward compatibility
             coverPhotoUrl: dbUser.cover_photo_url,
             interests: dbUser.interests || [],
             level: dbUser.skill_level,
             workoutTimePreference: dbUser.workout_time_preference,
             isPremium: dbUser.is_premium,
-            isProTrainer: dbUser.is_pro_trainer,
+            isTrainer: dbUser.is_pro_trainer,
             xp: dbUser.xp_points,
             userLevel: dbUser.user_level,
             dailySwipes: dbUser.daily_swipes,

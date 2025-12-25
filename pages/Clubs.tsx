@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { GlassCard, GlassButton, GlassInput, GlassSelectable } from '../components/ui/Glass';
-import { Users, MapPin, Search, Plus, Calendar, CheckCircle2, ShieldCheck, Crown, ArrowRight, Zap, Lock, Clock, Star, X, Image as ImageIcon, AlignLeft, Sparkles, Send, Bot, Timer } from 'lucide-react';
+import { Users, MapPin, Search, Plus, Calendar, CheckCircle2, ShieldCheck, Crown, ArrowRight, Zap, Lock, Clock, Star, X, Image as ImageIcon, AlignLeft, Sparkles, Send, Bot, Timer, SlidersHorizontal, RotateCcw, ArrowLeft, Briefcase, Eye, AlertCircle, ChevronRight, Loader2 } from 'lucide-react';
 import { SportType, SportEvent, Club } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { notificationService } from '../services/notificationService';
@@ -16,8 +16,202 @@ import { clubSchema } from '../utils/validation';
 import { clubService } from '../services/clubService';
 import { trainerService } from '../services/trainerService';
 import { realtimeManager } from '../services/realtimeManager';
+import { SkeletonCard } from '../components/ui/SkeletonCard';
+import { SkeletonList } from '../components/ui/SkeletonList';
 
-// Mock data removed
+// Filter Modal Component
+const FilterModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    filters: { maxDistance: number; sport: SportType | 'All' };
+    setFilters: React.Dispatch<React.SetStateAction<{ maxDistance: number; sport: SportType | 'All' }>>;
+    isLight: boolean;
+}> = ({ isOpen, onClose, filters, setFilters, isLight }) => {
+    if (!isOpen) return null;
+
+    const getTrackBackground = (val: number, min: number, max: number, color: string) => {
+        const percentage = ((val - min) / (max - min)) * 100;
+        const bg = isLight ? '#cbd5e1' : 'rgba(255,255,255,0.1)';
+        return `linear-gradient(to right, ${color} 0%, ${color} ${percentage}%, ${bg} ${percentage}%, ${bg} 100%)`;
+    };
+
+    return (
+        <div className={`fixed inset-0 z-[200] flex flex-col animate-fade-in font-sans overflow-hidden ${isLight ? 'bg-[#f8fafc]' : 'bg-black'}`}>
+            <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none z-0">
+                <div className={`absolute inset-0 transition-colors duration-700 ${isLight ? 'bg-[#f0f4f8]' : 'bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-[#0f0f11] via-[#000000] to-[#000000]'}`}></div>
+                <div className={`absolute top-[-20%] left-[-20%] w-[900px] h-[900px] rounded-full filter blur-[100px] animate-blob ${isLight ? 'mix-blend-multiply bg-indigo-300/50 opacity-60' : 'mix-blend-screen bg-[#4b29ff]/20'}`} style={{ animationDuration: '25s' }}></div>
+                <div className={`absolute bottom-[-20%] right-[-20%] w-[800px] h-[800px] rounded-full filter blur-[100px] animate-blob ${isLight ? 'mix-blend-multiply bg-lime-300/50 opacity-60' : 'mix-blend-screen bg-[#deff90]/15'}`} style={{ animationDelay: '-5s', animationDuration: '20s' }}></div>
+            </div>
+
+            <div className="relative z-10 flex flex-col h-full">
+                <div className="px-6 pt-12 pb-6 flex items-center justify-between">
+                    <div>
+                        <h2 className={`text-3xl font-display font-bold tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>Filters</h2>
+                        <p className={`text-sm ${isLight ? 'text-slate-500' : 'text-white/50'}`}>Refine your search.</p>
+                    </div>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={() => { hapticFeedback.medium(); setFilters({ maxDistance: 50, sport: 'All' }); }}
+                            className={`w-12 h-12 rounded-full flex items-center justify-center transition-all active:scale-90 border backdrop-blur-xl ${isLight ? 'bg-white/80 text-slate-400 border-slate-200 hover:text-slate-900' : 'bg-white/5 text-white/40 border-white/10 hover:text-white'}`}
+                        >
+                            <RotateCcw size={20} />
+                        </button>
+                        <button
+                            onClick={() => { hapticFeedback.medium(); onClose(); }}
+                            className={`w-12 h-12 rounded-full flex items-center justify-center transition-all active:scale-90 border shadow-sm backdrop-blur-xl ${isLight ? 'bg-white/80 text-slate-900 border-slate-200' : 'bg-white/10 text-white border-white/10 hover:bg-white/20'}`}
+                        >
+                            <X size={24} />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-6 py-2 space-y-10 no-scrollbar">
+                    {/* Max Distance */}
+                    <section>
+                        <div className="flex justify-between items-center mb-6">
+                            <div className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest ${isLight ? 'text-slate-400' : 'text-white/60'}`}>
+                                <MapPin size={14} className="text-brand-lime" /> Max Distance
+                            </div>
+                            <div className={`text-xl font-display ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                                {filters.maxDistance} <span className="text-sm font-sans font-medium opacity-50">km</span>
+                            </div>
+                        </div>
+                        <div className="relative h-10 flex items-center px-1">
+                            <input
+                                type="range"
+                                min="1"
+                                max="50"
+                                value={filters.maxDistance}
+                                onChange={(e) => setFilters(prev => ({ ...prev, maxDistance: parseInt(e.target.value) }))}
+                                className="w-full h-2 bg-transparent appearance-none cursor-pointer relative z-20 focus:outline-none"
+                                style={{
+                                    background: getTrackBackground(filters.maxDistance, 1, 50, isLight ? '#0f172a' : '#4b29ff'),
+                                    borderRadius: '999px'
+                                }}
+                            />
+                            <style>{`
+                                input[type=range]::-webkit-slider-thumb {
+                                    -webkit-appearance: none;
+                                    height: 24px;
+                                    width: 24px;
+                                    border-radius: 50%;
+                                    background: #ffffff;
+                                    border: 3px solid ${isLight ? '#0f172a' : '#4b29ff'};
+                                    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                                    margin-top: -11px; 
+                                    transform: translateY(11px);
+                                }
+                            `}</style>
+                        </div>
+                    </section>
+
+                    {/* Sport Category */}
+                    <section>
+                        <div className={`flex items-center justify-between mb-6`}>
+                            <div className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest ${isLight ? 'text-slate-400' : 'text-white/60'}`}>
+                                <Crown size={14} className="text-amber-400" /> Category
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                onClick={() => setFilters(prev => ({ ...prev, sport: 'All' }))}
+                                className={`px-5 py-2.5 rounded-[20px] text-xs font-bold border transition-all ${filters.sport === 'All' ? (isLight ? 'bg-slate-900 text-white border-slate-900' : 'bg-brand-lime text-black border-brand-lime') : (isLight ? 'bg-white text-slate-500 border-slate-200' : 'bg-white/5 border-white/10 text-white/60')}`}
+                            >
+                                All
+                            </button>
+                            {Object.values(SportType).map(sport => (
+                                <button
+                                    key={sport}
+                                    onClick={() => setFilters(prev => ({ ...prev, sport }))}
+                                    className={`px-5 py-2.5 rounded-[20px] text-xs font-bold border transition-all ${filters.sport === sport ? (isLight ? 'bg-slate-900 text-white border-slate-900' : 'bg-brand-lime text-black border-brand-lime') : (isLight ? 'bg-white text-slate-500 border-slate-200' : 'bg-white/5 border-white/10 text-white/60')}`}
+                                >
+                                    {sport}
+                                </button>
+                            ))}
+                        </div>
+                    </section>
+                </div>
+
+                <div className={`p-6 pb-10 border-t backdrop-blur-2xl z-20 ${isLight ? 'bg-white/80 border-slate-200' : 'bg-black/80 border-white/10'}`}>
+                    <GlassButton
+                        onClick={() => { hapticFeedback.success(); onClose(); }}
+                        className={`w-full h-14 text-lg font-display shadow-2xl transition-transform hover:scale-[1.02] active:scale-[0.98] ${isLight ? 'shadow-slate-300' : 'shadow-brand-lime/20'}`}
+                    >
+                        Apply Filters
+                    </GlassButton>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Club List Item Component
+const ClubListItem: React.FC<{ club: Club; isLight: boolean; userId?: string }> = ({ club, isLight, userId }) => {
+    const navigate = useNavigate();
+    const isOwner = club.ownerId === userId;
+    const isMember = club.membershipStatus === 'member';
+
+    return (
+        <div
+            onClick={() => navigate(`/clubs/${club.id}`, { state: { club } })}
+            className={`p-5 rounded-[32px] border relative overflow-hidden group cursor-pointer animate-slide-up backdrop-blur-xl transition-transform hover:scale-[1.01] ${isLight ? 'bg-white/60 border-slate-200 shadow-lg' : 'bg-white/5 border-white/10 shadow-xl'}`}
+        >
+            {isOwner && (
+                <div className="absolute top-0 right-0 bg-brand-lime text-black text-[9px] font-bold px-3 py-1.5 rounded-bl-xl z-20 shadow-md">
+                    OWNER
+                </div>
+            )}
+
+            <div className="relative z-10">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl overflow-hidden bg-black/20 shrink-0 border border-white/10">
+                            <img src={club.image} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" alt={club.name} />
+                        </div>
+                        <div>
+                            <div className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 flex items-center gap-2 ${isLight ? 'text-slate-500' : 'text-white/60'}`}>
+                                {club.sport}
+                                <CheckCircle2 size={10} className="text-brand-lime" />
+                            </div>
+                            <h3 className={`text-xl font-display font-bold leading-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>{club.name}</h3>
+                        </div>
+                    </div>
+
+                    {!isOwner && (
+                        <div className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${club.membershipStatus === 'member'
+                            ? (isLight ? 'bg-slate-100 border-slate-200 text-slate-700' : 'bg-white/10 border-white/10 text-white')
+                            : 'bg-transparent border-transparent'
+                            }`}>
+                            {club.membershipStatus === 'member' ? 'Member' : (club.membershipStatus === 'pending' ? 'Pending' : '')}
+                        </div>
+                    )}
+                </div>
+
+                <div className={`flex items-center gap-3 text-xs mb-4 ${isLight ? 'text-slate-500' : 'text-white/60'}`}>
+                    <span className="flex items-center gap-1"><MapPin size={12} /> {club.location}</span>
+                </div>
+
+                <div className="flex justify-between items-center pt-4 border-t border-dashed border-white/10">
+                    <div className={`flex items-center gap-1.5 text-xs font-bold ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
+                        <Users size={14} className={isLight ? "text-slate-400" : "text-white/40"} />
+                        {club.members} Members
+                    </div>
+
+                    <button
+                        className={`px-6 py-2.5 rounded-[24px] text-xs font-bold transition-all duration-300 shadow-lg flex items-center gap-2 ${isMember || isOwner
+                            ? (isLight ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-brand-lime text-black hover:bg-[#caff70]')
+                            : (isLight ? 'bg-white text-slate-900 border border-slate-200' : 'bg-white/10 text-white hover:bg-white/20')
+                            }`}
+                    >
+                        {isOwner ? 'Manage' : (isMember ? 'View Club' : 'View Details')}
+                        <ChevronRight size={14} />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 export const Clubs: React.FC = () => {
     const navigate = useNavigate();
@@ -32,12 +226,42 @@ export const Clubs: React.FC = () => {
     const [pros, setPros] = useState<any[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<'all' | 'my_clubs'>('all');
+    const [loading, setLoading] = useState(true);
+
+    // New filter states
+    const [showFilters, setShowFilters] = useState(false);
+    const [filters, setFilters] = useState<{ maxDistance: number; sport: SportType | 'All' }>({
+        maxDistance: 50,
+        sport: 'All'
+    });
+    const [showFullList, setShowFullList] = useState(false);
+
+    // Helper to parse distance
+    const parseDistance = (d: string | undefined) => {
+        if (!d) return 99999;
+        return parseFloat(d.replace(/[^0-9.]/g, ''));
+    };
+
+    // Filtered & Sorted Clubs
+    const filteredClubs = useMemo(() => {
+        let filtered = allClubs.filter(club => {
+            const matchesSearch = club.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                club.location?.toLowerCase().includes(searchQuery.toLowerCase());
+            const matchesView = viewMode === 'all' || club.membershipStatus === 'member';
+            const matchesSport = filters.sport === 'All' || club.sport === filters.sport;
+            const isOwner = club.ownerId === user?.id;
+            return matchesSearch && matchesView && matchesSport;
+        });
+        return filtered;
+    }, [allClubs, searchQuery, viewMode, filters, user]);
+
 
     // Load Data from Supabase
     useEffect(() => {
         if (!user) return;
 
         const loadData = async () => {
+            setLoading(true);
             try {
                 // Load Clubs
                 const clubs = await clubService.getClubs({
@@ -98,6 +322,8 @@ export const Clubs: React.FC = () => {
                 setPros(trainers.slice(0, 5)); // Top 5
             } catch (e) {
                 console.error('Error loading data:', e);
+            } finally {
+                setLoading(false);
             }
         };
 
@@ -137,10 +363,10 @@ export const Clubs: React.FC = () => {
 
     // Control Tab Bar Visibility based on modal state
     useEffect(() => {
-        const isAnyModalOpen = showLanding || showCreateForm || showVerificationModal || showPTModal || showCreateEventModal;
+        const isAnyModalOpen = showLanding || showCreateForm || showVerificationModal || showPTModal || showCreateEventModal || showFilters || showFullList;
         setTabBarVisible(!isAnyModalOpen);
         return () => setTabBarVisible(true);
-    }, [showLanding, showCreateForm, showVerificationModal, showPTModal, showCreateEventModal, setTabBarVisible]);
+    }, [showLanding, showCreateForm, showVerificationModal, showPTModal, showCreateEventModal, showFilters, showFullList, setTabBarVisible]);
 
     useEffect(() => {
         if (showPTModal) {
@@ -341,12 +567,101 @@ export const Clubs: React.FC = () => {
                 description="To maintain high quality communities, we require club founders to verify their identity."
             />
 
+            {/* Filter Modal */}
+            <FilterModal
+                isOpen={showFilters}
+                onClose={() => setShowFilters(false)}
+                filters={filters}
+                setFilters={setFilters}
+                isLight={isLight}
+            />
+
+            {/* Full List View */}
+            {showFullList && (
+                <div className="fixed inset-0 z-[100] min-h-full px-6 pt-10 pb-24 animate-fade-in overflow-y-auto bg-transparent">
+                    {/* Atmosphere Background */}
+                    <div className="fixed inset-0 w-full h-full overflow-hidden pointer-events-none z-0">
+                        <div className={`absolute inset-0 transition-colors duration-700 ${isLight ? 'bg-[#f0f4f8]' : 'bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-[#0f0f11] via-[#000000] to-[#000000]'}`}></div>
+                        <div className={`absolute top-[-20%] left-[-20%] w-[900px] h-[900px] rounded-full filter blur-[100px] animate-blob ${isLight ? 'mix-blend-multiply bg-indigo-300/50 opacity-60' : 'mix-blend-screen bg-[#4b29ff]/20'}`} style={{ animationDuration: '25s' }}></div>
+                        <div className={`absolute bottom-[-20%] right-[-20%] w-[800px] h-[800px] rounded-full filter blur-[100px] animate-blob ${isLight ? 'mix-blend-multiply bg-lime-300/50 opacity-60' : 'mix-blend-screen bg-[#deff90]/15'}`} style={{ animationDelay: '-5s', animationDuration: '20s' }}></div>
+                    </div>
+
+                    <div className="relative z-10">
+                        {/* Full List Header */}
+                        <div className="flex justify-between items-center mb-6">
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => setShowFullList(false)}
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center transition backdrop-blur-md ${isLight ? 'bg-white/40 border border-slate-200 text-slate-600 hover:bg-white' : 'bg-white/5 border border-white/5 text-white/60 hover:text-white hover:bg-white/10'}`}
+                                >
+                                    <ArrowLeft size={20} />
+                                </button>
+                                <div>
+                                    <h1 className={`text-3xl font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>Clubs</h1>
+                                    <p className={`text-sm ${isLight ? 'text-slate-500' : 'text-white/60'}`}>{viewMode === 'all' ? 'Explore communities.' : 'Your squads.'}</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={handlePlusClick}
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all ${isLight ? 'bg-white border-slate-200 text-slate-600' : 'bg-white/10 border-white/10 text-white'}`}
+                                >
+                                    <Plus size={18} />
+                                </button>
+                                <button
+                                    onClick={() => setShowFilters(true)}
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all ${isLight ? 'bg-white border-slate-200 text-slate-600' : 'bg-white/10 border-white/10 text-white'}`}
+                                >
+                                    <SlidersHorizontal size={18} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Tabs */}
+                        <div className={`flex p-1 rounded-xl mb-6 backdrop-blur-md border ${isLight ? 'bg-slate-200/50 border-slate-200' : 'bg-white/10 border-white/10'}`}>
+                            <button
+                                onClick={() => { hapticFeedback.light(); setViewMode('all'); }}
+                                className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${viewMode === 'all' ? (isLight ? 'bg-white text-slate-900 shadow-sm' : 'bg-white text-black shadow-md') : (isLight ? 'text-slate-500 hover:text-slate-800' : 'text-white/60 hover:text-white')}`}
+                            >
+                                Discover
+                            </button>
+                            <button
+                                onClick={() => { hapticFeedback.light(); setViewMode('my_clubs'); }}
+                                className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${viewMode === 'my_clubs' ? (isLight ? 'bg-white text-slate-900 shadow-sm' : 'bg-white text-black shadow-md') : (isLight ? 'text-slate-500 hover:text-slate-800' : 'text-white/60 hover:text-white')}`}
+                            >
+                                My Clubs
+                            </button>
+                        </div>
+
+                        {/* List */}
+                        <div className="grid grid-cols-1 gap-4">
+                            {filteredClubs.map(club => (
+                                <ClubListItem key={club.id} club={club} isLight={isLight} userId={user?.id} />
+                            ))}
+                            {filteredClubs.length === 0 && (
+                                <div className="text-center py-20 opacity-50 text-xs">
+                                    No clubs found.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Header */}
             <div className="px-6 pt-8 mb-6">
                 <div className="flex justify-between items-end mb-6">
                     <div>
                         <h1 className={`text-3xl font-display font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>Discover</h1>
                         <p className={`text-sm ${isLight ? 'text-slate-500' : 'text-white/60'}`}>Find your tribe.</p>
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setShowFilters(true)}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all ${isLight ? 'bg-white border-slate-200 text-slate-600' : 'bg-white/10 border-white/10 text-white'}`}
+                        >
+                            <SlidersHorizontal size={18} />
+                        </button>
                     </div>
                 </div>
 
@@ -488,41 +803,51 @@ export const Clubs: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Pros Section */}
-                <div className="mb-10">
+                {/* Pros Section - Business Hub (Locked) */}
+                <div className="mb-10 relative">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className={`text-lg font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>Top Trainers</h2>
-                        <button
-                            onClick={() => navigate('/trainers')}
-                            className={`text-xs font-bold ${isLight ? 'text-neon-blue' : 'text-neon-blue'}`}
-                        >
-                            View All
-                        </button>
                     </div>
 
-                    <div className="flex gap-4 overflow-x-auto no-scrollbar -mx-6 px-6 pb-4 snap-x">
-                        {pros.map((pro, i) => (
-                            <div
-                                key={pro.id}
-                                onClick={() => navigate(`/trainers/${pro.id}`)}
-                                className={`
-                            snap-center shrink-0 w-64 p-3 rounded-[32px] border flex items-center gap-4 cursor-pointer transition-all active:scale-95 backdrop-blur-xl
-                            ${isLight
-                                        ? 'bg-white/50 border-white/60 shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:bg-white'
-                                        : 'bg-white/5 border-white/10 shadow-lg hover:bg-white/10'}
-                        `}
-                                style={{ animationDelay: `${i * 100}ms` }}
-                            >
-                                <img src={pro.avatarUrl} className="w-16 h-16 rounded-2xl object-cover" alt={pro.name} />
-                                <div>
-                                    <h3 className={`font-bold text-sm mb-1 ${isLight ? 'text-slate-900' : 'text-white'}`}>{pro.name}</h3>
-                                    <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isLight ? 'text-slate-500' : 'text-white/60'}`}>{pro.specialties?.[0] || 'Pro'}</div>
-                                    <div className="flex items-center gap-1 text-[10px] font-bold text-amber-500">
-                                        <Star size={10} fill="currentColor" /> {pro.rating}
+                    <div className="relative rounded-[32px] overflow-hidden">
+                        {/* Blurred Background Content */}
+                        <div className="flex gap-4 overflow-x-auto no-scrollbar px-6 pb-4 snap-x opacity-50 filter blur-[12px] select-none pointer-events-none -mx-6">
+                            {pros.map((pro, i) => (
+                                <div
+                                    key={pro.id}
+                                    className={`snap-center shrink-0 w-64 p-3 rounded-[32px] border flex items-center gap-4 relative bg-white/5 border-white/10`}
+                                >
+                                    <img src={pro.avatarUrl} className="w-16 h-16 rounded-2xl object-cover grayscale" alt="" />
+                                    <div>
+                                        <h3 className="font-bold text-sm mb-1 text-white">{pro.name}</h3>
+                                        <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-white/60">{pro.specialties?.[0] || 'Pro'}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Locked Overlay */}
+                        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center p-6 bg-black/60 backdrop-blur-sm">
+                            <div className="w-16 h-16 rounded-full bg-black border border-white/10 flex items-center justify-center shadow-2xl relative mb-4">
+                                <Briefcase size={32} className="text-white/20" />
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="w-8 h-8 rounded-full bg-brand-lime flex items-center justify-center shadow-[0_0_15px_rgba(222,255,144,0.6)] animate-pulse">
+                                        <Lock size={14} className="text-black" strokeWidth={3} />
                                     </div>
                                 </div>
                             </div>
-                        ))}
+
+                            <h3 className="text-3xl font-display font-black text-white mb-2 tracking-tighter drop-shadow-lg">
+                                TRAINERS PROGRAM
+                            </h3>
+                            <p className="text-white/70 text-xs font-medium mb-6 max-w-[240px] leading-relaxed">
+                                Contact us for our Trainers Program.
+                            </p>
+
+                            <GlassButton onClick={() => navigate('/contact')} className="!bg-brand-lime !text-black border-0 shadow-[0_0_20px_rgba(222,255,144,0.3)]">
+                                Contact Us
+                            </GlassButton>
+                        </div>
                     </div>
                 </div>
 
@@ -539,62 +864,30 @@ export const Clubs: React.FC = () => {
                                 <Plus size={16} />
                             </button>
                         </div>
-                        <div className={`flex p-0.5 rounded-[12px] backdrop-blur-md border ${isLight ? 'bg-slate-100 border-slate-200' : 'bg-white/5 border-white/10'}`}>
-                            <button
-                                onClick={() => setViewMode('all')}
-                                className={`px-3 py-1 text-[10px] font-bold rounded-md transition ${viewMode === 'all' ? (isLight ? 'bg-white shadow-sm text-slate-900' : 'bg-white/20 text-white shadow-sm') : (isLight ? 'text-slate-500' : 'text-white/50')}`}
-                            >
-                                All
-                            </button>
-                            <button
-                                onClick={() => setViewMode('my_clubs')}
-                                className={`px-3 py-1 text-[10px] font-bold rounded-md transition ${viewMode === 'my_clubs' ? (isLight ? 'bg-white shadow-sm text-slate-900' : 'bg-white/20 text-white shadow-sm') : (isLight ? 'text-slate-500' : 'text-white/50')}`}
-                            >
-                                My Clubs
-                            </button>
-                        </div>
+                        <button
+                            onClick={() => { hapticFeedback.light(); setShowFullList(true); }}
+                            className={`text-xs font-bold ${isLight ? 'text-neon-blue' : 'text-neon-blue'}`}
+                        >
+                            View All
+                        </button>
                     </div>
 
-                    <div className="space-y-4">
-                        {allClubs.filter(c => viewMode === 'all' || c.membershipStatus === 'member').map((club, i) => (
-                            <div
-                                key={club.id}
-                                onClick={() => navigate(`/clubs/${club.id}`, { state: { club } })}
-                                className={`
-                            group relative h-48 rounded-[32px] overflow-hidden cursor-pointer border transition-transform active:scale-[0.98] animate-slide-up backdrop-blur-xl
-                            ${isLight ? 'border-white/60 shadow-xl bg-white/50' : 'border-white/10 shadow-2xl bg-white/5'}
-                        `}
-                                style={{ animationDelay: `${i * 100}ms` }}
-                            >
-                                <img src={club.image} className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" alt={club.name} />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+                    <div className="grid grid-cols-1 gap-4">
+                        {loading ? (
+                            <SkeletonList count={3} gap={16}>
+                                <SkeletonCard variant="club" />
+                            </SkeletonList>
+                        ) : (
+                            filteredClubs.slice(0, 3).map(club => (
+                                <ClubListItem key={club.id} club={club} isLight={isLight} userId={user?.id} />
+                            ))
+                        )}
 
-                                <div className="absolute top-4 right-4">
-                                    {club.membershipStatus === 'member' ? (
-                                        <div className="px-3 py-1 bg-green-500/20 backdrop-blur-md border border-green-500/30 rounded-full text-green-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                                            <CheckCircle2 size={10} /> Member
-                                        </div>
-                                    ) : club.membershipStatus === 'pending' ? (
-                                        <div className="px-3 py-1 bg-amber-500/20 backdrop-blur-md border border-amber-500/30 rounded-full text-amber-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                                            <Timer size={10} /> Pending
-                                        </div>
-                                    ) : (
-                                        <div className="w-8 h-8 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white border border-white/20">
-                                            <Plus size={16} />
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="absolute bottom-0 left-0 w-full p-6">
-                                    <div className="text-[10px] font-bold text-neon-blue uppercase tracking-widest mb-1">{club.sport}</div>
-                                    <h3 className="text-2xl font-display font-bold text-white mb-2">{club.name}</h3>
-                                    <div className="flex items-center gap-3 text-white/70 text-xs">
-                                        <span className="flex items-center gap-1"><Users size={12} /> {club.members} members</span>
-                                        <span className="flex items-center gap-1"><MapPin size={12} /> {club.location}</span>
-                                    </div>
-                                </div>
+                        {filteredClubs.length === 0 && !loading && (
+                            <div className="text-center py-8 opacity-50 text-xs">
+                                No clubs found matching your search.
                             </div>
-                        ))}
+                        )}
                     </div>
                 </div>
 
@@ -621,7 +914,7 @@ export const Clubs: React.FC = () => {
                                             <Bot size={20} className="text-white" />
                                         </div>
                                         <div>
-                                            <h3 className="font-display font-bold text-white leading-none mb-1">SportPulse Coach</h3>
+                                            <h3 className="font-display font-bold text-white leading-none mb-1">bind Coach</h3>
                                             <div className="flex items-center gap-1.5">
                                                 <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.5)]"></span>
                                                 <span className="text-[10px] font-bold uppercase tracking-wider text-white/50">AI Online</span>

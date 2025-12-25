@@ -131,8 +131,8 @@ export const locationService = {
    * Check if running on native platform (Capacitor)
    */
   isNativePlatform(): boolean {
-    return typeof (window as any).Capacitor !== 'undefined' && 
-           (window as any).Capacitor.isNativePlatform();
+    return typeof (window as any).Capacitor !== 'undefined' &&
+      (window as any).Capacitor.isNativePlatform();
   },
 
   /**
@@ -220,12 +220,12 @@ export const locationService = {
       }
 
       const data = await response.json();
-      
+
       // Extract city and country
       const address = data.address || {};
       const city = address.city || address.town || address.municipality || address.county || address.state || '';
       const country = address.country || '';
-      
+
       if (city && country) {
         return `${city}, ${country}`;
       } else if (city) {
@@ -235,7 +235,7 @@ export const locationService = {
         const parts = data.display_name.split(',').map((p: string) => p.trim());
         return parts.slice(0, 2).join(', ');
       }
-      
+
       return 'Unknown Location';
     } catch (error) {
       console.error('Reverse geocoding error:', error);
@@ -255,7 +255,7 @@ export const locationService = {
   }> {
     const location = await this.getCurrentLocation();
     const cityName = await this.reverseGeocode(location.latitude, location.longitude);
-    
+
     return {
       ...location,
       cityName
@@ -318,7 +318,7 @@ export const locationService = {
   async updateUserLocation(userId: string): Promise<void> {
     try {
       const location = await this.getCurrentLocation();
-      
+
       const { error } = await supabase
         .from('users')
         .update({
@@ -340,7 +340,7 @@ export const locationService = {
    * Get nearby users within radius
    */
   async getNearbyUsers(
-    userId: string, 
+    userId: string,
     radiusKm: number = 10,
     filters?: {
       sport?: string;
@@ -399,14 +399,14 @@ export const locationService = {
     const R = 6371; // Earth radius in km
     const dLat = this.toRad(lat2 - lat1);
     const dLon = this.toRad(lon2 - lon1);
-    
+
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(this.toRad(lat1)) *
-        Math.cos(this.toRad(lat2)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-    
+      Math.cos(this.toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   },
@@ -681,8 +681,8 @@ export const locationService = {
       name: data.name,
       type: data.type as LocationType,
       coordinates: {
-        x: data.coordinates_x || 50,
-        y: data.coordinates_y || 50
+        lat: data.coordinates_x || 50,
+        lng: data.coordinates_y || 50
       },
       rating: data.rating || 0,
       reviews: data.reviews || 0,

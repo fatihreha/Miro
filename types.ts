@@ -81,8 +81,27 @@ export interface ActivityRequest {
   time: string;
   location: string;
   note?: string;
-  status: 'pending' | 'accepted' | 'declined';
+  status: 'pending' | 'accepted' | 'declined' | 'in_progress' | 'completed';
   timestamp: Date;
+  // Workout session tracking
+  attendanceUpdate?: 'on_time' | 'late' | 'missed';
+  startedAt?: string;
+  completedAt?: string;
+  // Training Prep Room fields
+  senderReady?: boolean;
+  receiverReady?: boolean;
+  senderLevel?: string;
+  senderDistance?: string;
+  noShowReason?: string;
+}
+
+export interface PhotoComment {
+  id: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  timestamp: Date;
+  photoIndex: number;
 }
 
 export interface MapLocation {
@@ -137,7 +156,8 @@ export interface User {
   bio: string;
   location: string;
   avatarUrl: string;
-  photos?: string[]; // Added support for multiple profile photos
+  photos?: string[]; // Multi-photo profile support (up to 6 photos, first photo = avatarUrl)
+  photoComments?: PhotoComment[]; // Comments on user's photos
   interests: SportType[];
   level: 'Beginner' | 'Intermediate' | 'Pro';
   distance?: string;
@@ -148,17 +168,19 @@ export interface User {
   isPremium?: boolean;
   xp?: number;
   userLevel?: number;
+  streak?: number;
+  lastActiveDate?: string;
   badges?: Badge[];
-  workoutTimePreference?: 'Morning' | 'Evening' | 'Any'; // New field
+  workoutTimePreference?: 'Morning' | 'Evening' | 'Any' | 'Anytime'; // Any=app, Anytime=DB
   preferences?: {
     maxDistance: number;
     maxAge: number;
   };
-  
+
   // Swipe Limiting
   dailySwipes?: number; // Remaining swipes for the day
   lastSwipeReset?: string; // ISO Date string of last reset
-  
+
   // Trainer / Marketplace Fields
   isTrainer?: boolean;
   verificationStatus?: 'pending' | 'verified' | 'rejected' | 'none';
@@ -168,7 +190,7 @@ export interface User {
   rating?: number;
   reviewCount?: number;
   specialties?: string[];
-  
+
   // Pro Dashboard Fields
   availability?: {
     days: string[]; // e.g., ['Mon', 'Wed', 'Fri']
@@ -177,6 +199,41 @@ export interface User {
   };
   bookings?: Booking[];
   proFinance?: ProFinanceSettings;
+
+  // Enhanced Onboarding Fields
+  diet?: string;
+  supplements?: string[];
+  funFact?: string;
+  widgetStyle?: string;
+  workoutEnvironment?: string[];
+  fitnessGoal?: string;
+
+  // Location Fields
+  latitude?: number;
+  longitude?: number;
+  showLocation?: boolean;
+  coverPhotoUrl?: string;
+}
+
+// Flattened trainer profile used in UI after mapping Supabase rows
+export interface TrainerProfile {
+  id: string; // trainers.id used for navigation
+  trainerId: string; // explicit trainers.id for booking/detail
+  userId: string; // users.id owner
+  name: string;
+  avatarUrl: string;
+  location?: string;
+  gender?: 'Male' | 'Female' | 'Non-binary' | 'Other';
+  age?: number;
+  specialties: string[];
+  interests: SportType[];
+  level?: 'Beginner' | 'Intermediate' | 'Pro';
+  hourlyRate?: number;
+  rating?: number;
+  reviewCount?: number;
+  isTrainer?: boolean;
+  distanceKm?: number; // computed client-side when coords available
+  bio?: string;
 }
 
 export interface Club {
@@ -216,6 +273,19 @@ export interface WorkoutInvite {
   status: 'pending' | 'accepted' | 'declined';
 }
 
+export interface WorkoutPlan {
+  title: string;
+  focus: string;
+  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  duration: string;
+  exercises: {
+    name: string;
+    sets: number;
+    reps: string;
+    rest?: string;
+  }[];
+}
+
 export interface Message {
   id: string;
   senderId: string;
@@ -226,9 +296,11 @@ export interface Message {
   timestamp: Date;
   isAiGenerated?: boolean;
   isFlagged?: boolean; // New field for safety check
+  isRead?: boolean; // Read receipt status
   type?: 'text' | 'invite';
   inviteDetails?: WorkoutInvite;
   image?: string; // Base64 string for image messages
+  workoutPlan?: WorkoutPlan; // For structured workout plans
 }
 
 export interface ChatSession {
@@ -243,6 +315,7 @@ export interface SubscriptionPackage {
   title: string;
   description: string;
   savings?: string;
+  tier?: 'GOLD' | 'PRO';
 }
 
 export interface SportEvent {
@@ -260,4 +333,6 @@ export interface SportEvent {
   attendeeAvatars?: string[];
   isJoined?: boolean;
   attendanceStatus?: 'guest' | 'pending' | 'going'; // Added for request flow
+  rules?: string[]; // Event rules
+  notes?: string; // Private notes for attendees
 }

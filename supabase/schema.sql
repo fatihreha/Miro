@@ -28,6 +28,10 @@ CREATE TABLE public.users (
   is_premium BOOLEAN DEFAULT FALSE,
   xp_points INTEGER DEFAULT 0,
   user_level INTEGER DEFAULT 1,
+  streak INTEGER DEFAULT 0,
+  last_streak_date DATE,
+  reliability_rating DECIMAL(3,2) DEFAULT 5.0,
+  total_ratings_received INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   last_active TIMESTAMPTZ DEFAULT NOW()
@@ -128,6 +132,42 @@ CREATE TABLE public.bookings (
 );
 
 -- ============================================
+-- REVIEWS (Trainer Reviews)
+-- ============================================
+CREATE TABLE public.reviews (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  trainer_id UUID REFERENCES public.trainers(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  booking_id UUID REFERENCES public.bookings(id) ON DELETE SET NULL,
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(trainer_id, user_id, booking_id)
+);
+
+-- Index for fast review queries
+CREATE INDEX idx_reviews_trainer ON public.reviews(trainer_id, created_at DESC);
+CREATE INDEX idx_reviews_user ON public.reviews(user_id, created_at DESC);
+
+-- ============================================
+-- USER RATINGS (Workout Partner Reliability)
+-- ============================================
+CREATE TABLE public.user_ratings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  rated_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  rater_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  workout_request_id UUID REFERENCES public.workout_requests(id) ON DELETE SET NULL,
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(rated_user_id, rater_user_id, workout_request_id)
+);
+
+-- Index for fast rating queries
+CREATE INDEX idx_user_ratings_rated ON public.user_ratings(rated_user_id, created_at DESC);
+CREATE INDEX idx_user_ratings_rater ON public.user_ratings(rater_user_id, created_at DESC);
+
+-- ============================================
 -- CLUBS (Communities)
 -- ============================================
 CREATE TABLE public.clubs (
@@ -221,6 +261,36 @@ CREATE TABLE public.user_badges (
 );
 
 -- ============================================
+-- BLOCKED USERS
+-- ============================================
+CREATE TABLE public.blocked_users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  blocker_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  blocked_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  blocked_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(blocker_id, blocked_user_id)
+);
+
+-- Index for fast blocked user queries
+CREATE INDEX idx_blocked_users_blocker ON public.blocked_users(blocker_id);
+CREATE INDEX idx_blocked_users_blocked ON public.blocked_users(blocked_user_id);
+
+-- ============================================
+-- USER CONSENTS (KVKK Compliance)
+-- ============================================
+CREATE TABLE public.user_consents (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE UNIQUE,
+  location BOOLEAN DEFAULT TRUE,
+  notifications BOOLEAN DEFAULT TRUE,
+  analytics BOOLEAN DEFAULT TRUE,
+  marketing BOOLEAN DEFAULT FALSE,
+  "thirdParty" BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
 -- REPORTS (Safety)
 -- ============================================
 CREATE TABLE public.reports (
@@ -256,9 +326,13 @@ ALTER TABLE public.matches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workout_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_ratings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clubs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.club_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.blocked_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_consents ENABLE ROW LEVEL SECURITY;
 
 -- Users: Can read all public profiles, update only own
 CREATE POLICY "Users are viewable by everyone" ON public.users FOR SELECT USING (true);
@@ -284,6 +358,37 @@ CREATE POLICY "Clubs are publicly viewable" ON public.clubs FOR SELECT USING (tr
 CREATE POLICY "Club owners can update" ON public.clubs FOR UPDATE USING (
   auth.uid() = (SELECT auth_id FROM public.users WHERE id = owner_id)
 );
+
+-- Reviews: Public read, only reviewers can create/update own
+CREATE POLICY "Reviews are publicly viewable" ON public.reviews FOR SELECT USING (true);
+CREATE POLICY "Users can create reviews" ON public.reviews FOR INSERT WITH CHECK (
+  auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id)
+);
+CREATE POLICY "Users can update own reviews" ON public.reviews FOR UPDATE USING (
+  auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id)
+);
+
+-- User Ratings: Public read, only raters can create own
+CREATE POLICY "User ratings are publicly viewable" ON public.user_ratings FOR SELECT USING (true);
+CREATE POLICY "Users can create ratings" ON public.user_ratings FOR INSERT WITH CHECK (
+  auth.uid() = (SELECT auth_id FROM public.users WHERE id = rater_user_id)
+);
+
+-- Blocked Users: Only blocker can manage
+CREATE POLICY "Users can view own blocked list" ON public.blocked_users 
+  FOR SELECT USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = blocker_id));
+CREATE POLICY "Users can block others" ON public.blocked_users 
+  FOR INSERT WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = blocker_id));
+CREATE POLICY "Users can unblock others" ON public.blocked_users 
+  FOR DELETE USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = blocker_id));
+
+-- User Consents: Only own consents
+CREATE POLICY "Users can view own consents" ON public.user_consents 
+  FOR SELECT USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "Users can create consents" ON public.user_consents 
+  FOR INSERT WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "Users can update own consents" ON public.user_consents 
+  FOR UPDATE USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
 
 -- ============================================
 -- FUNCTIONS & TRIGGERS

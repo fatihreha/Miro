@@ -20,7 +20,7 @@ export class RequestService {
       const requestData = {
         from_user_id: request.senderId,
         to_user_id: request.receiverId,
-        sport: request.activity,
+        sport: request.sport,
         location: request.location,
         scheduled_date: request.date,
         scheduled_time: request.time,
@@ -106,7 +106,7 @@ export class RequestService {
    */
   async updateRequestStatus(
     requestId: string,
-    status: 'accepted' | 'rejected' | 'completed'
+    status: 'accepted' | 'rejected' | 'completed' | 'in_progress'
   ): Promise<boolean> {
     try {
       const { error } = await supabase
@@ -172,7 +172,9 @@ export class RequestService {
     this.activeSubscriptions.set(channelName, channel);
 
     return () => {
-      channel.unsubscribe();
+      if (channel && typeof channel.unsubscribe === 'function') {
+        channel.unsubscribe();
+      }
       this.activeSubscriptions.delete(channelName);
     };
   }
@@ -187,11 +189,12 @@ export class RequestService {
       receiverId: dbRequest.to_user_id,
       senderName: dbRequest.sender?.name || 'Unknown',
       senderAvatar: dbRequest.sender?.avatar_url || '',
-      activity: dbRequest.sport,
+      sport: dbRequest.sport,
       date: dbRequest.scheduled_date,
       time: dbRequest.scheduled_time,
       location: dbRequest.location,
-      status: dbRequest.status
+      status: dbRequest.status,
+      timestamp: new Date(dbRequest.created_at || Date.now())
     };
   }
 

@@ -106,7 +106,7 @@ export const PrivacySettings: React.FC = () => {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `sportpulse_data_${user.id}_${Date.now()}.zip`;
+            a.download = `bind_data_${user.id}_${Date.now()}.zip`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);

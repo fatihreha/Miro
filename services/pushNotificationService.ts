@@ -87,14 +87,24 @@ class PushNotificationService {
         try {
             const platform = Capacitor.getPlatform(); // 'ios' or 'android'
 
+            // Get device info
+            const deviceInfo = {
+                platform,
+                userAgent: navigator.userAgent,
+                language: navigator.language,
+                timestamp: new Date().toISOString()
+            };
+
             const { error } = await supabase
                 .from('push_tokens')
                 .upsert({
                     user_id: userId,
                     token: token,
-                    platform: platform
+                    platform: platform,
+                    device_info: deviceInfo,
+                    updated_at: new Date().toISOString()
                 }, {
-                    onConflict: 'user_id,token'
+                    onConflict: 'token'
                 });
 
             if (error) {

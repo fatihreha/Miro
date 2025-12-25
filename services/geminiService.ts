@@ -247,6 +247,78 @@ export const generateSharedWorkoutPlan = async (user1: User, user2: Partial<User
     }
 };
 
+export const generateStructuredWorkout = async (user1: User, user2: Partial<User>, sport?: string): Promise<any> => {
+    // Prioritize shared interests or manual selection
+    const commonInterests = user1.interests.filter(i => user2.interests?.includes(i));
+    const focusSport = sport || (commonInterests.length > 0 ? commonInterests[0] : (user2.interests?.[0] || user1.interests[0] || 'General Fitness'));
+  
+    try {
+      const prompt = `Create a structured workout plan for two people focusing on **${focusSport}**.
+      
+      User 1: Level ${user1.level}, Interests: ${user1.interests.join(', ')}.
+      User 2: Level ${user2.level || 'Intermediate'}, Interests: ${user2.interests?.join(', ') || 'Fitness'}.
+      
+      Return ONLY a valid JSON object (no markdown, no explanations) in this exact format:
+      {
+        "title": "Fun workout title",
+        "focus": "${focusSport}",
+        "difficulty": "Beginner" or "Intermediate" or "Advanced",
+        "duration": "45-60 mins",
+        "exercises": [
+          {
+            "name": "Exercise name",
+            "sets": 3,
+            "reps": "12-15",
+            "rest": "60s"
+          }
+        ]
+      }
+      
+      Include 5-8 exercises appropriate for two people training together.`;
+  
+      const text = await callGeminiAPI(prompt);
+      
+      // Try to parse JSON response
+      try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
+        }
+      } catch (parseError) {
+        console.error("Failed to parse workout JSON:", parseError);
+      }
+      
+      // Fallback structured workout
+      return {
+        title: `${focusSport} Partner Workout`,
+        focus: focusSport,
+        difficulty: user1.level === 'Beginner' ? 'Beginner' : user1.level === 'Pro' ? 'Advanced' : 'Intermediate',
+        duration: '45-60 mins',
+        exercises: [
+          { name: 'Warm-up: Dynamic stretches', sets: 1, reps: '5 mins', rest: '0s' },
+          { name: `${focusSport} Technique drills`, sets: 3, reps: '10-12', rest: '60s' },
+          { name: 'Partner challenge', sets: 3, reps: '15', rest: '90s' },
+          { name: 'Cardio interval', sets: 4, reps: '30s', rest: '30s' },
+          { name: 'Cool-down: Static stretches', sets: 1, reps: '5 mins', rest: '0s' }
+        ]
+      };
+    } catch (error) {
+      console.error("Gemini Structured Workout Error:", error);
+      return {
+        title: `${focusSport} Partner Workout`,
+        focus: focusSport,
+        difficulty: 'Intermediate',
+        duration: '45-60 mins',
+        exercises: [
+          { name: 'Warm-up', sets: 1, reps: '5 mins', rest: '0s' },
+          { name: `${focusSport} drills`, sets: 3, reps: '12', rest: '60s' },
+          { name: 'Partner exercise', sets: 3, reps: '15', rest: '90s' },
+          { name: 'Cool-down', sets: 1, reps: '5 mins', rest: '0s' }
+        ]
+      };
+    }
+};
+
 export const chatWithAICoach = async (userProfile: User, message: string, history: {role: 'user' | 'model', parts: [{text: string}]}[]): Promise<string> => {
     try {
         const systemInstruction = `You are SportPulse AI, an elite Personal Trainer, Nutritionist, and Sports Coach.

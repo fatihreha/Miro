@@ -1,14 +1,17 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GlassCard, GlassButton, GlassSelectable, GlassInput } from '../components/ui/Glass';
-import { User, SportType } from '../types';
-import { Star, MapPin, Clock, DollarSign, X, Dumbbell, ChevronRight, ArrowLeft, User as UserIcon } from 'lucide-react';
+import { User, SportType, TrainerProfile } from '../types';
+import { Star, MapPin, DollarSign, X, Dumbbell, ChevronRight, ArrowLeft } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { notificationService } from '../services/notificationService';
 import { hapticFeedback } from '../services/hapticService';
 import { useAuth } from '../context/AuthContext';
 import { trainerService } from '../services/trainerService';
+import { locationService } from '../services/locationService';
+import { SkeletonCard } from '../components/ui/SkeletonCard';
+import { SkeletonList } from '../components/ui/SkeletonList';
 
 // Mock data removed
 
@@ -19,46 +22,139 @@ export const Trainers: React.FC = () => {
     const isLight = theme === 'light';
 
     const [selectedSport, setSelectedSport] = useState<SportType | 'All'>('All');
-    const [selectedTrainer, setSelectedTrainer] = useState<User | null>(null);
+    const [selectedTrainer, setSelectedTrainer] = useState<TrainerProfile | null>(null);
     const [bookingStep, setBookingStep] = useState<'date' | 'confirm'>('date');
     const [bookingDate, setBookingDate] = useState('');
     const [bookingTime, setBookingTime] = useState('');
-    const [allTrainers, setAllTrainers] = useState<User[]>([]);
+    const [allTrainers, setAllTrainers] = useState<TrainerProfile[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+    const [locationAllowed, setLocationAllowed] = useState<boolean | null>(null);
+    const [locationLoading, setLocationLoading] = useState(false);
+
+    const requestLocation = async () => {
+        setLocationLoading(true);
+        try {
+            const loc = await locationService.getCurrentLocation();
+            setUserCoords({ lat: loc.latitude, lon: loc.longitude });
+            setLocationAllowed(true);
+        } catch (err) {
+            console.warn('Location unavailable:', err);
+            setUserCoords(null);
+            setLocationAllowed(false);
+        } finally {
+            setLocationLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        requestLocation();
+    }, []);
+
+    const extractCoords = (userRecord: any): { lat: number; lon: number } | null => {
+        if (!userRecord) return null;
+        const geo = userRecord.location_coords;
+        if (geo?.coordinates && Array.isArray(geo.coordinates) && geo.coordinates.length === 2) {
+            const [lon, lat] = geo.coordinates;
+            return { lat, lon };
+        }
+        if (typeof userRecord.latitude === 'number' && typeof userRecord.longitude === 'number') {
+            return { lat: userRecord.latitude, lon: userRecord.longitude };
+        }
+        return null;
+    };
+
+    const mapTrainerRow = (row: any): TrainerProfile => {
+        const userRecord = row?.user || {};
+        const trainerId = String(row?.id || userRecord?.id || '');
+        const coords = extractCoords(userRecord);
+        const distanceKm = userCoords && coords
+            ? Number(locationService.calculateDistance(userCoords.lat, userCoords.lon, coords.lat, coords.lon).toFixed(1))
+            : undefined;
+
+        return {
+            id: trainerId,
+            trainerId,
+            userId: String(userRecord?.id || trainerId),
+            name: userRecord?.name || 'Trainer',
+            avatarUrl: userRecord?.avatar_url || userRecord?.avatarUrl || '',
+            location: userRecord?.location || userRecord?.city || 'Location unavailable',
+            gender: userRecord?.gender,
+            age: userRecord?.age,
+            specialties: row?.specialties || [],
+            interests: userRecord?.interests || [],
+            level: userRecord?.level || 'Pro',
+            hourlyRate: row?.hourly_rate ?? row?.hourlyRate ?? 0,
+            rating: row?.rating ?? 0,
+            reviewCount: row?.review_count ?? row?.reviewCount ?? 0,
+            isTrainer: true,
+            distanceKm,
+            bio: row?.bio_trainer || userRecord?.bio
+        };
+    };
 
     // Load trainers from Supabase
     useEffect(() => {
         const loadTrainers = async () => {
+            setLoading(true);
+            setError(null);
             try {
                 const data = await trainerService.getTrainers({
                     sport: selectedSport !== 'All' ? selectedSport : undefined
                 });
 
-                let trainers = data;
+                const mapped = (data || []).map(mapTrainerRow);
 
-                // Add current user if they're a trainer
                 if (currentUser?.isTrainer) {
-                    trainers = [currentUser, ...trainers.filter(t => t.id !== currentUser.id)];
+                    const me: TrainerProfile = {
+                        id: currentUser.id,
+                        trainerId: currentUser.id,
+                        userId: currentUser.id,
+                        name: currentUser.name,
+                        avatarUrl: currentUser.avatarUrl,
+                        location: currentUser.location,
+                        gender: currentUser.gender,
+                        age: currentUser.age,
+                        specialties: currentUser.specialties || [],
+                        interests: currentUser.interests || [],
+                        level: currentUser.level,
+                        hourlyRate: currentUser.hourlyRate,
+                        rating: currentUser.rating,
+                        reviewCount: currentUser.reviewCount,
+                        isTrainer: true,
+                        distanceKm: undefined,
+                        bio: currentUser.bio
+                    };
+                    setAllTrainers([me, ...mapped.filter(t => t.id !== currentUser.id)]);
+                } else {
+                    setAllTrainers(mapped);
                 }
-
-                setAllTrainers(trainers);
             } catch (e) {
                 console.error('Error loading trainers:', e);
+                setError('Eğitmenler yüklenemedi.');
                 setAllTrainers([]);
+            } finally {
+                setLoading(false);
             }
         };
         loadTrainers();
-    }, [selectedSport, currentUser]);
+    }, [selectedSport, currentUser, userCoords]);
 
-    const filteredTrainers = selectedSport === 'All'
-        ? allTrainers
-        : allTrainers.filter(t => t.interests.includes(selectedSport));
+    const filteredTrainers = useMemo(() => {
+        if (selectedSport === 'All') return allTrainers;
+        return allTrainers.filter(t =>
+            (t.interests || []).includes(selectedSport) ||
+            (t.specialties || []).some(s => typeof s === 'string' && s.toLowerCase() === selectedSport.toLowerCase())
+        );
+    }, [allTrainers, selectedSport]);
 
-    const handleBookClick = (trainer: User, e: React.MouseEvent) => {
+    const handleBookClick = (trainer: TrainerProfile, e: React.MouseEvent) => {
         e.stopPropagation(); // Prevent navigation when clicking book button
 
         // If user clicks book on themselves, go to dashboard
-        if (currentUser && trainer.id === currentUser.id) {
-            navigate(`/trainers/${trainer.id}`);
+        if (currentUser && trainer.userId === currentUser.id) {
+            navigate(`/trainers/${trainer.trainerId}`);
             return;
         }
 
@@ -68,8 +164,8 @@ export const Trainers: React.FC = () => {
         setBookingTime('');
     };
 
-    const handleTrainerClick = (trainer: User) => {
-        navigate(`/trainers/${trainer.id}`, { state: { trainer } });
+    const handleTrainerClick = (trainer: TrainerProfile) => {
+        navigate(`/trainers/${trainer.trainerId}`, { state: { trainer } });
     };
 
     const handleConfirmBooking = async () => {
@@ -79,7 +175,7 @@ export const Trainers: React.FC = () => {
             // Save to Supabase
             try {
                 await trainerService.bookSession({
-                    trainerId: selectedTrainer.id,
+                    trainerId: selectedTrainer.trainerId,
                     userId: currentUser.id,
                     scheduledDate: bookingDate,
                     scheduledTime: bookingTime,
@@ -137,42 +233,68 @@ export const Trainers: React.FC = () => {
                 ))}
             </div>
 
-            {/* Trainers List */}
-            <div className="space-y-5">
-                {filteredTrainers.map((trainer, index) => {
-                    const isMe = currentUser?.id === trainer.id;
-                    return (
-                        <div
-                            key={trainer.id}
-                            onClick={() => handleTrainerClick(trainer)}
-                            className={`relative group rounded-[32px] border overflow-hidden transition-all hover:scale-[1.01] cursor-pointer animate-slide-up ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-white/5 border-white/10'}`}
-                            style={{ animationDelay: `${index * 100}ms` }}
-                        >
-                            {isMe && (
-                                <div className="absolute top-0 left-0 right-0 h-1 bg-neon-blue shadow-[0_0_10px_rgba(0,242,255,0.5)] z-10" />
-                            )}
+            {locationAllowed === false && (
+                <div className={`mb-4 p-3 rounded-2xl border ${isLight ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-amber-500/40 bg-amber-500/10 text-amber-100'}`}>
+                    Konum izni alınamadı. Mesafe bilgisi gösterilemiyor.
+                    <button
+                        disabled={locationLoading}
+                        onClick={requestLocation}
+                        className={`ml-3 text-sm font-bold underline ${locationLoading ? 'opacity-60' : ''}`}
+                    >
+                        {locationLoading ? 'İzin isteniyor...' : 'İzin ver'}
+                    </button>
+                </div>
+            )}
 
-                            <div className="flex p-4 gap-4">
-                                <div className="relative w-20 h-20 rounded-[24px] overflow-hidden flex-shrink-0">
-                                    <img src={trainer.avatarUrl} className="w-full h-full object-cover" alt={trainer.name} />
-                                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm py-0.5 text-center">
-                                        <div className="text-[10px] font-bold text-white flex items-center justify-center gap-1">
-                                            <Star size={8} fill="currentColor" className="text-amber-400" /> {trainer.rating || 'New'}
+            {loading ? (
+                <SkeletonList count={4} gap={20}>
+                    <SkeletonCard variant="trainer" />
+                </SkeletonList>
+            ) : error ? (
+                <div className={`text-sm mb-4 ${isLight ? 'text-red-600' : 'text-red-400'}`}>
+                    {error}
+                </div>
+            ) : (
+                <>
+                    {/* Trainers List */}
+                    <div className="space-y-5">
+                        {filteredTrainers.map((trainer, index) => {
+                            const isMe = currentUser?.id === trainer.userId;
+                            return (
+                                <div
+                                    key={trainer.id}
+                                    onClick={() => handleTrainerClick(trainer)}
+                                    className={`relative group rounded-[32px] border overflow-hidden transition-all hover:scale-[1.01] cursor-pointer animate-slide-up ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-white/5 border-white/10'}`}
+                                    style={{ animationDelay: `${index * 100}ms` }}
+                                >
+                                    {isMe && (
+                                        <div className="absolute top-0 left-0 right-0 h-1 bg-neon-blue shadow-[0_0_10px_rgba(0,242,255,0.5)] z-10" />
+                                    )}
+
+                                    <div className="flex p-4 gap-4">
+                                        <div className="relative w-20 h-20 rounded-[24px] overflow-hidden flex-shrink-0">
+                                            <img src={trainer.avatarUrl} className="w-full h-full object-cover" alt={trainer.name} />
+                                            <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm py-0.5 text-center">
+                                                <div className="text-[10px] font-bold text-white flex items-center justify-center gap-1">
+                                                    <Star size={8} fill="currentColor" className="text-amber-400" /> {trainer.rating || 'New'}
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
 
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex justify-between items-start">
-                                        <div>
-                                            <div className="flex items-center gap-1">
-                                                <h3 className={`font-bold text-lg leading-none mb-1 hover:text-neon-blue transition-colors ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                                                    {isMe ? 'You (Pro Profile)' : trainer.name}
-                                                </h3>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <div className="flex items-center gap-1">
+                                                        <h3 className={`font-bold text-lg leading-none mb-1 hover:text-neon-blue transition-colors ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                                                            {isMe ? 'You (Pro Profile)' : trainer.name}
+                                                        </h3>
                                                 {!isMe && <ChevronRight size={14} className={`opacity-0 group-hover:opacity-100 transition-opacity -ml-1 ${isLight ? 'text-slate-400' : 'text-white/40'}`} />}
                                             </div>
                                             <div className={`text-xs flex items-center gap-1 ${isLight ? 'text-slate-500' : 'text-white/60'}`}>
-                                                <MapPin size={10} /> {trainer.location}
+                                                <MapPin size={10} />
+                                                {trainer.distanceKm !== undefined
+                                                    ? `${trainer.distanceKm.toFixed(1)} km` + (trainer.location ? ` • ${trainer.location}` : '')
+                                                    : (trainer.location || 'Location unavailable')}
                                             </div>
                                         </div>
                                         <div className={`text-lg font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
@@ -201,7 +323,9 @@ export const Trainers: React.FC = () => {
                         </div>
                     );
                 })}
-            </div>
+                    </div>
+                </>
+            )}
 
             {/* Booking Modal (Inline quick book) */}
             {selectedTrainer && (

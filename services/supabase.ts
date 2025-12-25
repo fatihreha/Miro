@@ -24,6 +24,37 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
+// =============================================
+// API Performance Measurement Helper
+// =============================================
+const SLOW_API_THRESHOLD_MS = 1000; // Log warning for API calls > 1 second
+
+/**
+ * Measure API call performance and log slow queries
+ */
+export async function measureApiCall<T>(
+  name: string,
+  apiCall: () => Promise<T>
+): Promise<T> {
+  const start = performance.now();
+  try {
+    const result = await apiCall();
+    const duration = performance.now() - start;
+
+    if (duration > SLOW_API_THRESHOLD_MS) {
+      console.warn(`⚠️ Slow API call: ${name} took ${duration.toFixed(0)}ms`);
+    } else if (import.meta.env.MODE === 'development') {
+      console.log(`📊 API: ${name} - ${duration.toFixed(0)}ms`);
+    }
+
+    return result;
+  } catch (error) {
+    const duration = performance.now() - start;
+    console.error(`❌ API error: ${name} failed after ${duration.toFixed(0)}ms`, error);
+    throw error;
+  }
+}
+
 // Supabase Auth Helpers
 export const authHelpers = {
   // Sign up with email
@@ -95,6 +126,19 @@ export const authHelpers = {
       data: updates
     });
     return { data, error };
+  },
+
+  // Sign in with OAuth (Google, Apple)
+  async signInWithOAuth(provider: 'google' | 'apple') {
+    const redirectUrl = `${window.location.origin}${window.location.pathname}`;
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: redirectUrl,
+        skipBrowserRedirect: false
+      }
+    });
+    return { data, error };
   }
 };
 
@@ -154,20 +198,20 @@ export const storageHelpers = {
     const fileExt = file.name.split('.').pop();
     const fileName = `${userId}-${Date.now()}.${fileExt}`;
     const filePath = `${fileName}`;
-    
+
     const { data, error } = await supabase.storage
       .from('avatars')
       .upload(filePath, file, {
         cacheControl: '3600',
         upsert: true
       });
-    
+
     if (error) return { data: null, error };
-    
+
     const { data: { publicUrl } } = supabase.storage
       .from('avatars')
       .getPublicUrl(filePath);
-    
+
     return { data: { path: filePath, url: publicUrl }, error: null };
   },
 

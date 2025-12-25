@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/react';
+import React from 'react';
 
 /**
  * Sentry APM Service
@@ -8,7 +9,6 @@ import * as Sentry from '@sentry/react';
  * - Performance monitoring
  * - User context tracking
  * - Breadcrumb logging
- * - Custom transactions
  */
 
 export interface SentryConfig {
@@ -39,24 +39,10 @@ export const sentryService = {
             replaysSessionSampleRate: config.replaysSessionSampleRate || 0.1, // 10% of sessions
             replaysOnErrorSampleRate: 1.0, // 100% of error sessions
 
-            // Integrations
+            // Integrations - using new API
             integrations: [
-                new Sentry.BrowserTracing({
-                    // Track all routing changes
-                    routingInstrumentation: Sentry.reactRouterV6Instrumentation(
-                        // @ts-ignore - React Router hooks
-                        React.useEffect,
-                        // @ts-ignore
-                        useLocation,
-                        // @ts-ignore
-                        useNavigationType,
-                        // @ts-ignore
-                        createRoutesFromChildren,
-                        // @ts-ignore
-                        matchRoutes
-                    ),
-                }),
-                new Sentry.Replay({
+                Sentry.browserTracingIntegration(),
+                Sentry.replayIntegration({
                     maskAllText: false,
                     blockAllMedia: false,
                 }),
@@ -149,13 +135,10 @@ export const sentryService = {
     },
 
     /**
-     * Start a performance transaction
+     * Start a performance span (new API)
      */
-    startTransaction(name: string, op: string = 'custom'): Sentry.Transaction {
-        return Sentry.startTransaction({
-            name,
-            op,
-        });
+    startSpan<T>(name: string, callback: () => T): T {
+        return Sentry.startSpan({ name, op: 'custom' }, callback);
     },
 
     /**
@@ -165,21 +148,17 @@ export const sentryService = {
         name: string,
         apiCall: () => Promise<T>
     ): Promise<T> {
-        const transaction = Sentry.startTransaction({
-            name: `API: ${name}`,
-            op: 'http.client',
-        });
-
-        try {
-            const result = await apiCall();
-            transaction.setStatus('ok');
-            return result;
-        } catch (error) {
-            transaction.setStatus('internal_error');
-            throw error;
-        } finally {
-            transaction.finish();
-        }
+        return Sentry.startSpan(
+            { name: `API: ${name}`, op: 'http.client' },
+            async () => {
+                try {
+                    return await apiCall();
+                } catch (error) {
+                    Sentry.captureException(error);
+                    throw error;
+                }
+            }
+        );
     },
 
     /**

@@ -5,11 +5,11 @@ import {
     ArrowLeft, Send, Sparkles, MoreVertical,
     Calendar, MapPin, Clock, Check, X,
     Plus, Activity, ShieldAlert, Image as ImageIcon,
-    Bot, Dumbbell, Camera, Flame, ChevronLeft, ChevronRight, Navigation
+    Bot, Dumbbell, Camera, Flame, ChevronLeft, ChevronRight, Navigation, Shield, AlertCircle
 } from 'lucide-react';
 import { GlassInput, GlassButton, GlassSelectable } from '../components/ui/Glass';
 import { ReportModal } from '../components/modals/ReportModal';
-import { generateIcebreaker, checkSafety, generateSharedWorkoutPlan, analyzeImage } from '../services/geminiService';
+import { generateIcebreaker, checkSafety, generateStructuredWorkout, analyzeImage } from '../services/geminiService';
 import { notificationService } from '../services/notificationService';
 import { chatService } from '../services/chatService';
 import { requestService } from '../services/requestService';
@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import { Message, SportType, User, ActivityRequest } from '../types';
 import { hapticFeedback } from '../services/hapticService';
 import { useTheme } from '../context/ThemeContext';
+import { analytics, ANALYTICS_EVENTS } from '../utils/analytics';
 
 // --- Helper Data ---
 const NEARBY_SPOTS = [
@@ -64,6 +65,20 @@ const MessageBubble: React.FC<{
                 <div className={`p-3 text-center text-[10px] font-bold uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-white/50'}`}>
                     {isMe ? 'Request Sent' : 'Tap to View'}
                 </div>
+            </div>
+        );
+    }
+
+    // Render WorkoutCard if message contains workout plan
+    if ((msg as any).workoutPlan) {
+        return (
+            <div className="max-w-[85%]">
+                {!isMe && (
+                    <span className={`text-[9px] font-bold mb-1 block opacity-50 ${isLight ? 'text-slate-500' : 'text-white'}`}>
+                        {isAi ? 'AI Coach' : partnerName}
+                    </span>
+                )}
+                <WorkoutCard plan={(msg as any).workoutPlan} isLight={isLight} />
             </div>
         );
     }
@@ -167,6 +182,109 @@ const ChatbotQuestion: React.FC<{
     </div>
 );
 
+// WorkoutCard Component for interactive workout plans
+const WorkoutCard: React.FC<{ plan: any, isLight: boolean }> = ({ plan, isLight }) => {
+    const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
+
+    const toggleCheck = (index: number) => {
+        setCheckedItems(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(index)) {
+                newSet.delete(index);
+            } else {
+                newSet.add(index);
+            }
+            return newSet;
+        });
+    };
+
+    const allChecked = checkedItems.size === plan.exercises.length;
+    const completionPercent = Math.round((checkedItems.size / plan.exercises.length) * 100);
+
+    return (
+        <div className={`p-4 rounded-2xl border ${isLight
+            ? 'bg-gradient-to-br from-blue-50 to-cyan-50 border-blue-200'
+            : 'bg-gradient-to-br from-blue-900/30 to-cyan-900/20 border-blue-800'
+            }`}>
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                    <Dumbbell className={isLight ? 'text-blue-600' : 'text-blue-400'} size={20} />
+                    <h4 className={`font-semibold ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                        {plan.title}
+                    </h4>
+                </div>
+                <span className={`text-xs font-medium px-2 py-1 rounded-full ${plan.difficulty === 'Beginner'
+                    ? isLight ? 'bg-green-100 text-green-700' : 'bg-green-900/50 text-green-300'
+                    : plan.difficulty === 'Intermediate'
+                        ? isLight ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-900/50 text-yellow-300'
+                        : isLight ? 'bg-red-100 text-red-700' : 'bg-red-900/50 text-red-300'
+                    }`}>
+                    {plan.difficulty}
+                </span>
+            </div>
+
+            <div className={`text-sm mb-3 ${isLight ? 'text-gray-600' : 'text-gray-300'}`}>
+                <p><strong>Focus:</strong> {plan.focus}</p>
+                <p><strong>Duration:</strong> {plan.duration}</p>
+            </div>
+
+            <div className="space-y-2">
+                {plan.exercises.map((exercise: any, idx: number) => (
+                    <div
+                        key={idx}
+                        onClick={() => toggleCheck(idx)}
+                        className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all ${checkedItems.has(idx)
+                            ? isLight ? 'bg-green-100 border border-green-300' : 'bg-green-900/30 border border-green-700'
+                            : isLight ? 'bg-white border border-gray-200 hover:bg-gray-50' : 'bg-gray-800/50 border border-gray-700 hover:bg-gray-800'
+                            }`}
+                    >
+                        <div className={`flex-shrink-0 mt-1 w-5 h-5 rounded border-2 flex items-center justify-center ${checkedItems.has(idx)
+                            ? isLight ? 'bg-green-500 border-green-500' : 'bg-green-600 border-green-600'
+                            : isLight ? 'border-gray-300' : 'border-gray-600'
+                            }`}>
+                            {checkedItems.has(idx) && <Check size={14} className="text-white" />}
+                        </div>
+                        <div className="flex-1">
+                            <p className={`font-medium ${isLight ? 'text-gray-900' : 'text-white'} ${checkedItems.has(idx) ? 'line-through opacity-70' : ''}`}>
+                                {exercise.name}
+                            </p>
+                            <p className={`text-xs ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                                {exercise.sets} sets × {exercise.reps} reps
+                                {exercise.rest && ` • Rest: ${exercise.rest}`}
+                            </p>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {allChecked && (
+                <div className={`mt-3 p-3 rounded-lg text-center ${isLight ? 'bg-green-100 border border-green-300' : 'bg-green-900/30 border border-green-700'
+                    }`}>
+                    <p className={`font-semibold ${isLight ? 'text-green-700' : 'text-green-300'}`}>
+                        🎉 Workout Complete! Great job!
+                    </p>
+                </div>
+            )}
+
+            {!allChecked && (
+                <div className="mt-3 flex items-center gap-2">
+                    <div className={`flex-1 h-2 rounded-full overflow-hidden ${isLight ? 'bg-gray-200' : 'bg-gray-700'
+                        }`}>
+                        <div
+                            className={`h-full transition-all ${isLight ? 'bg-blue-600' : 'bg-blue-400'
+                                }`}
+                            style={{ width: `${completionPercent}%` }}
+                        />
+                    </div>
+                    <span className={`text-xs font-medium ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                        {checkedItems.size} / {plan.exercises.length} Completed
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const Chat: React.FC = () => {
     const { userId } = useParams();
     const navigate = useNavigate();
@@ -179,6 +297,8 @@ export const Chat: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [partner, setPartner] = useState<Partial<User> | null>(null);
     const [inputMessage, setInputMessage] = useState('');
+    const [showSafetyTip, setShowSafetyTip] = useState(true);
+    const [aiTypingText, setAiTypingText] = useState<string>('');
 
     // UI State
     const [showActions, setShowActions] = useState(false);
@@ -257,6 +377,16 @@ export const Chat: React.FC = () => {
         };
     }, [user, userId]);
 
+    // Safety tip disappears after 12 seconds
+    useEffect(() => {
+        if (showSafetyTip) {
+            const timer = setTimeout(() => {
+                setShowSafetyTip(false);
+            }, 12000);
+            return () => clearTimeout(timer);
+        }
+    }, [showSafetyTip]);
+
     // 3. Scroll handling
     const scrollToBottom = () => {
         setTimeout(() => {
@@ -306,6 +436,13 @@ export const Chat: React.FC = () => {
 
         await chatService.sendMessage(user.id, userId, textToSend, type, metadata);
 
+        // Track message sent event
+        analytics.track(ANALYTICS_EVENTS.MESSAGE_SENT, {
+            recipientId: userId,
+            messageType: type,
+            hasImage: !!imageToSend
+        });
+
         // If image was sent, trigger AI analysis (Vision Coach feature)
         if (imageToSend) {
             handleVisionAnalysis(imageToSend, textToSend);
@@ -342,15 +479,32 @@ export const Chat: React.FC = () => {
         if (!user || !partner) return;
         hapticFeedback.medium();
 
-        // Close menu and simulate AI typing
+        // Close menu and show AI typing with descriptive text
         setShowActions(false);
         setIsAiTyping(true);
+        setAiTypingText('Drafting workout plan...');
 
         try {
-            const plan = await generateSharedWorkoutPlan(user, partner, sport);
-            await chatService.sendMessage('ai-assistant', userId!, plan, 'text', { isAiGenerated: true });
+            const workoutPlan = await generateStructuredWorkout(user, partner, sport);
+
+            // Send as a message with workoutPlan embedded
+            const messageData: any = {
+                id: Date.now().toString(),
+                senderId: 'ai-assistant',
+                recipientId: user.id,
+                text: '', // Empty text since we have workoutPlan
+                timestamp: new Date(),
+                isAiGenerated: true,
+                workoutPlan: workoutPlan
+            };
+
+            await chatService.sendMessage('ai-assistant', userId!, '', 'text', {
+                isAiGenerated: true,
+                workoutPlan: workoutPlan
+            });
         } finally {
             setIsAiTyping(false);
+            setAiTypingText('');
         }
     };
 
@@ -476,8 +630,35 @@ export const Chat: React.FC = () => {
                 </button>
             </div>
 
+            {/* Safety Tip Banner */}
+            {showSafetyTip && (
+                <div className={`mx-4 mt-3 p-3 rounded-xl border flex items-start gap-3 ${isLight
+                    ? 'bg-blue-50 border-blue-200 text-blue-700'
+                    : 'bg-blue-900/20 border-blue-800 text-blue-300'
+                    }`}>
+                    <Shield size={18} className="flex-shrink-0 mt-0.5" />
+                    <p className="text-xs">
+                        <strong>Safety First:</strong> Never share personal info or meet privately without telling someone.
+                    </p>
+                </div>
+            )}
+
             {/* 2. MESSAGES AREA - Flex Grow with internal Scroll */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar relative z-10">
+                {aiTypingText && (
+                    <div className="flex items-center gap-2 text-sm mb-2 animate-slide-up">
+                        <div className={`px-3 py-2 rounded-lg ${isLight ? 'bg-gray-100 text-gray-600' : 'bg-gray-800 text-gray-300'}`}>
+                            <div className="flex items-center gap-2">
+                                <div className="flex gap-1">
+                                    <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                    <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                    <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                </div>
+                                <span>{aiTypingText}</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 {messages.map((msg, idx) => (
                     <div key={msg.id} className={`flex w-full ${msg.senderId === user?.id ? 'justify-end' : 'justify-start'} animate-slide-up`}>
                         <MessageBubble
@@ -727,17 +908,19 @@ export const Chat: React.FC = () => {
             ${isLight ? 'bg-white/80 border-slate-200' : 'bg-black/80 border-white/10'}
         `}>
                 <div className="flex items-end gap-2">
-                    <button
-                        onClick={() => { hapticFeedback.medium(); setShowActions(!showActions); }}
-                        className={`
-                        w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 shadow-lg border
-                        ${showActions
-                                ? 'bg-white text-black rotate-45 border-white'
-                                : (isLight ? 'bg-slate-900 text-white border-slate-900' : 'bg-[#27272a] text-white border-white/10')}
-                    `}
-                    >
-                        <Plus size={24} />
-                    </button>
+                    {!partner?.isTrainer && (
+                        <button
+                            onClick={() => { hapticFeedback.medium(); setShowActions(!showActions); }}
+                            className={`
+                            w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 shadow-lg border
+                            ${showActions
+                                    ? 'bg-white text-black rotate-45 border-white'
+                                    : (isLight ? 'bg-slate-900 text-white border-slate-900' : 'bg-[#27272a] text-white border-white/10')}
+                        `}
+                        >
+                            <Plus size={22} strokeWidth={2.5} />
+                        </button>
+                    )}
 
                     <div className={`flex-1 min-h-[48px] rounded-[24px] border flex items-center px-4 py-2 transition-all ${isLight ? 'bg-slate-100 border-slate-200 focus-within:bg-white focus-within:border-slate-300' : 'bg-white/5 border-white/10 focus-within:bg-black/40 focus-within:border-neon-blue/50'}`}>
                         <textarea

@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { User } from '../types';
 import { calculateCompatibility } from './geminiService';
+import { rateLimiter, RATE_LIMITS } from '../utils/rateLimit';
 
 /**
  * Real-time Match & Swipe Service using Supabase
@@ -9,6 +10,7 @@ import { calculateCompatibility } from './geminiService';
  * - Automatic match detection (database trigger)
  * - Real-time match notifications
  * - Match management
+ * - Rate limiting to prevent abuse
  */
 
 export class MatchService {
@@ -16,6 +18,7 @@ export class MatchService {
 
     /**
      * Record a swipe action with server-side validation and race condition handling
+     * Includes rate limiting to prevent abuse
      */
     async swipeUser(
         swiperId: string,
@@ -23,12 +26,21 @@ export class MatchService {
         action: 'like' | 'pass' | 'superlike'
     ): Promise<{ success: boolean; matched: boolean; matchData?: any; error?: string }> {
         try {
+            // Rate limiting check (client-side, in addition to server-side daily limit)
+            if (!rateLimiter.canMakeRequest(`swipe_${swiperId}`, RATE_LIMITS.SWIPE)) {
+                return {
+                    success: false,
+                    matched: false,
+                    error: 'Çok hızlı işlem yapıyorsunuz. Lütfen biraz bekleyin.'
+                };
+            }
+
             // Step 1: Server-side daily limit check (prevent client-side bypass)
             if (!await this.checkSwipeLimit(swiperId)) {
-                return { 
-                    success: false, 
-                    matched: false, 
-                    error: 'Daily swipe limit reached. Upgrade to Premium for unlimited swipes.' 
+                return {
+                    success: false,
+                    matched: false,
+                    error: 'Daily swipe limit reached. Upgrade to Premium for unlimited swipes.'
                 };
             }
 
@@ -42,10 +54,10 @@ export class MatchService {
 
             if (existingSwipe) {
                 console.log('Already swiped:', existingSwipe);
-                return { 
-                    success: false, 
-                    matched: false, 
-                    error: 'You already swiped this user' 
+                return {
+                    success: false,
+                    matched: false,
+                    error: 'You already swiped this user'
                 };
             }
 
@@ -67,16 +79,16 @@ export class MatchService {
 
             if (swipeError) {
                 console.error('Error recording swipe:', swipeError);
-                
+
                 // Check if duplicate key error
                 if (swipeError.code === '23505') {
-                    return { 
-                        success: false, 
-                        matched: false, 
-                        error: 'Swipe already recorded' 
+                    return {
+                        success: false,
+                        matched: false,
+                        error: 'Swipe already recorded'
                     };
                 }
-                
+
                 this.saveLocalSwipe(swiperId, swipedId, action);
                 return { success: false, matched: false, error: 'Failed to record swipe' };
             }
@@ -87,12 +99,12 @@ export class MatchService {
             // Step 6: Check if this created a match (only for likes)
             if (action === 'like' || action === 'superlike') {
                 const matchResult = await this.checkAndCreateMatch(swiperId, swipedId);
-                
+
                 if (matchResult.matched) {
-                    return { 
-                        success: true, 
-                        matched: true, 
-                        matchData: matchResult.matchData 
+                    return {
+                        success: true,
+                        matched: true,
+                        matchData: matchResult.matchData
                     };
                 }
             }
@@ -101,10 +113,10 @@ export class MatchService {
         } catch (error: any) {
             console.error('Swipe error:', error);
             this.saveLocalSwipe(swiperId, swipedId, action);
-            return { 
-                success: false, 
-                matched: false, 
-                error: error.message || 'Unexpected error' 
+            return {
+                success: false,
+                matched: false,
+                error: error.message || 'Unexpected error'
             };
         }
     }
@@ -139,12 +151,12 @@ export class MatchService {
                 // Reset swipes for new day
                 await supabase
                     .from('users')
-                    .update({ 
-                        daily_swipes: 10, 
-                        last_swipe_reset: today.toISOString() 
+                    .update({
+                        daily_swipes: 10,
+                        last_swipe_reset: today.toISOString()
                     })
                     .eq('id', userId);
-                
+
                 return true;
             }
 
@@ -200,7 +212,7 @@ export class MatchService {
 
             if (matchError) {
                 console.error('Match creation error:', matchError);
-                
+
                 // Might already exist (race condition) - fetch it
                 const { data: existingMatch } = await supabase
                     .from('matches')
@@ -212,13 +224,13 @@ export class MatchService {
                 if (existingMatch) {
                     return { matched: true, matchData: existingMatch };
                 }
-                
+
                 return { matched: false };
             }
 
-            console.log('✅ Match created:', matchData?.id);
+            console.log('✅ Match created:', (matchData as any)?.id);
             return { matched: true, matchData };
-            
+
         } catch (error) {
             console.error('Check and create match error:', error);
             return { matched: false };
@@ -228,7 +240,7 @@ export class MatchService {
     /**
      * Create a match with AI compatibility analysis
      */
-    private async createMatch(user1Id: string, user2Id: string): Promise<any> {
+    async createMatch(user1Id: string, user2Id: string): Promise<any> {
         try {
             // Fetch both user profiles
             const { data: users } = await supabase
@@ -517,7 +529,9 @@ export class MatchService {
         this.activeSubscriptions.set(channelName, channel);
 
         return () => {
-            channel.unsubscribe();
+            if (channel && typeof channel.unsubscribe === 'function') {
+                channel.unsubscribe();
+            }
             this.activeSubscriptions.delete(channelName);
         };
     }
@@ -539,7 +553,7 @@ export class MatchService {
             level: dbUser.skill_level,
             workoutTimePreference: dbUser.workout_time_preference,
             isPremium: dbUser.is_premium,
-            isProTrainer: dbUser.is_pro_trainer,
+            isTrainer: dbUser.is_pro_trainer,
             xp: dbUser.xp_points,
             userLevel: dbUser.user_level
         };

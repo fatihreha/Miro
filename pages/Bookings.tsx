@@ -50,13 +50,13 @@ export const Bookings: React.FC = () => {
   const handleCancelBooking = async (id: string) => {
     if (window.confirm('Are you sure you want to cancel this session?')) {
       hapticFeedback.medium();
-      
+
       // Optimistic update
       setBookings(prev => prev.map(b => b.id === id ? { ...b, status: 'cancelled' } : b));
-      
+
       try {
         // Persist to database
-        await trainerService.cancelBooking(id);
+        await trainerService.cancelBooking(id, user!.id);
         notificationService.showNotification("Booking Cancelled", { body: "The trainer has been notified." });
       } catch (error) {
         // Rollback on error

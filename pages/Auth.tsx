@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { GlassCard, GlassButton, GlassInput } from '../components/ui/Glass';
-import { Mail, Phone, ArrowRight, Smartphone, Loader2, ChevronLeft, Eye, EyeOff, User as UserIcon, Lock, Edit2 } from 'lucide-react';
+import { Mail, Phone, ArrowRight, Smartphone, Loader2, ChevronLeft, Eye, EyeOff, User as UserIcon, Lock, Edit2, KeyRound, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { hapticFeedback } from '../services/hapticService';
 import { notificationService } from '../services/notificationService';
@@ -12,6 +12,7 @@ import { User } from '../types';
 
 type AuthMethod = 'email' | 'phone';
 type AuthMode = 'login' | 'signup';
+type ViewState = 'auth' | 'forgot_password';
 
 export const Auth: React.FC = () => {
     const navigate = useNavigate();
@@ -25,6 +26,7 @@ export const Auth: React.FC = () => {
         }
     }, [isAuthenticated, navigate]);
 
+    const [view, setView] = useState<ViewState>('auth');
     const [mode, setMode] = useState<AuthMode>(searchParams.get('mode') === 'login' ? 'login' : 'signup');
     const [method, setMethod] = useState<AuthMethod>('email');
     const [isLoading, setIsLoading] = useState(false);
@@ -34,6 +36,8 @@ export const Auth: React.FC = () => {
     const [isCodeSent, setIsCodeSent] = useState(false);
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
     const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+    const [resendTimer, setResendTimer] = useState(30);
+    const [canResend, setCanResend] = useState(false);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -47,11 +51,19 @@ export const Auth: React.FC = () => {
 
     // Error State
     const [error, setError] = useState<string | null>(null);
-    
-    // Forgot Password State
-    const [showForgotPassword, setShowForgotPassword] = useState(false);
-    const [resetEmail, setResetEmail] = useState('');
-    const [resetSuccess, setResetSuccess] = useState(false);
+
+    // Timer Effect for Resend Code
+    useEffect(() => {
+        let interval: any;
+        if (isCodeSent && resendTimer > 0) {
+            interval = setInterval(() => {
+                setResendTimer((prev) => prev - 1);
+            }, 1000);
+        } else if (resendTimer === 0) {
+            setCanResend(true);
+        }
+        return () => clearInterval(interval);
+    }, [isCodeSent, resendTimer]);
 
     // Reset state when method changes
     const handleMethodChange = (newMethod: AuthMethod) => {
@@ -59,6 +71,8 @@ export const Auth: React.FC = () => {
         setMethod(newMethod);
         setIsCodeSent(false);
         setOtp(['', '', '', '', '', '']);
+        setResendTimer(30);
+        setCanResend(false);
         setError(null);
     };
 
@@ -66,25 +80,34 @@ export const Auth: React.FC = () => {
         hapticFeedback.medium();
         setMode(prev => prev === 'login' ? 'signup' : 'login');
         setIsCodeSent(false);
+        setView('auth');
         setError(null);
     };
 
     const handleForgotPassword = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!resetEmail) {
+        if (!formData.email) {
             setError('Please enter your email address.');
+            hapticFeedback.error();
             return;
         }
-        
+
         setIsLoading(true);
+        hapticFeedback.medium();
+
         try {
-            const { error } = await authHelpers.resetPasswordForEmail(resetEmail);
+            const { error } = await authHelpers.resetPasswordForEmail(formData.email);
             if (error) throw error;
-            
-            setResetSuccess(true);
+
             hapticFeedback.success();
+            notificationService.showNotification("Reset Link Sent", { body: "Check your inbox for instructions." });
+            setView('auth');
+            setMode('login');
         } catch (error: any) {
-            setError(error.message || 'Failed to send reset email.');
+            console.error("Reset Password Error", error);
+            let msg = "Failed to send reset email.";
+            if (error.message?.includes('User not found')) msg = "No account found with this email.";
+            setError(msg);
             hapticFeedback.error();
         } finally {
             setIsLoading(false);
@@ -117,6 +140,14 @@ export const Auth: React.FC = () => {
         }
     };
 
+    const handleResendCode = () => {
+        if (!canResend) return;
+        hapticFeedback.medium();
+        setCanResend(false);
+        setResendTimer(30);
+        notificationService.showNotification("Code Resent", { body: "A new verification code has been sent." });
+    };
+
     const activateDemoMode = async () => {
         // Production'da demo mode'u devre dışı bırak
         if (import.meta.env.PROD) {
@@ -137,7 +168,7 @@ export const Auth: React.FC = () => {
         const demoUser: Partial<User> = {
             id: mockId,
             name: formData.name || (mode === 'login' ? 'Demo User' : 'New Athlete'),
-            email: formData.email || 'demo@sportpulse.app',
+            email: formData.email || 'demo@bind.app',
             age: 24,
             location: 'Demo City',
             interests: [],
@@ -192,8 +223,10 @@ export const Auth: React.FC = () => {
                 setTimeout(() => {
                     setIsLoading(false);
                     setIsCodeSent(true);
+                    setResendTimer(30);
+                    setCanResend(false);
                     hapticFeedback.success();
-                    // notificationService.showNotification("Verification Code Sent", { body: "Please check your messages." });
+                    notificationService.showNotification("Verification Code Sent", { body: "Please check your messages." });
                     // Auto-focus first input
                     setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
                 }, 1500);
@@ -266,7 +299,9 @@ export const Auth: React.FC = () => {
                         bio: '',
                         location: '',
                         level: 'Beginner',
-                        workoutTimePreference: 'Anytime'
+                        workoutTimePreference: 'Anytime', // Must match DB constraint
+                        age: 18,
+                        avatarUrl: `https://i.pravatar.cc/300?u=${result.data.user.id}`
                     } as User);
 
                     if (!profileCreated) {
@@ -295,10 +330,20 @@ export const Auth: React.FC = () => {
                 if (result.error) throw result.error;
 
                 hapticFeedback.success();
-                
-                // Keep loading active - AuthContext will detect session change
-                // and Auth.tsx useEffect will redirect when isAuthenticated becomes true
-                return; // Prevent further execution
+
+                // Wait briefly for AuthContext to detect the session change
+                // then navigate directly if authenticated
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                // Check if session exists and navigate
+                if (result.data.session) {
+                    console.log('Login successful, navigating to home...');
+                    navigate('/', { replace: true });
+                    return;
+                }
+
+                // Fallback: keep loading for AuthContext to handle
+                return;
             }
 
         } catch (error: any) {
@@ -324,7 +369,13 @@ export const Auth: React.FC = () => {
             {/* Header */}
             <div className="relative z-10 p-6 pt-8">
                 <button
-                    onClick={() => navigate('/welcome')}
+                    onClick={() => {
+                        if (view === 'forgot_password') {
+                            setView('auth');
+                        } else {
+                            navigate('/welcome');
+                        }
+                    }}
                     className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition backdrop-blur-md"
                 >
                     <ChevronLeft size={24} />
@@ -336,17 +387,23 @@ export const Auth: React.FC = () => {
 
                 <div className="mb-8 text-center sm:text-left">
                     <h1 className="text-4xl sm:text-5xl font-display font-bold text-white mb-2 animate-slide-up tracking-tight drop-shadow-lg">
-                        {isCodeSent ? 'Verify Code' : (mode === 'login' ? 'Welcome Back' : 'Create Account')}
+                        {view === 'forgot_password'
+                            ? 'Reset Password'
+                            : isCodeSent
+                                ? 'Verify Code'
+                                : (mode === 'login' ? 'Welcome Back' : 'Join the Scrum')}
                     </h1>
                     <p className="text-white/60 animate-slide-up text-lg font-light" style={{ animationDelay: '100ms' }}>
-                        {isCodeSent
-                            ? `We sent a code to ${formData.code} ${formData.phone}`
-                            : (mode === 'login' ? 'Sign in to continue your streak.' : 'Join the club. Find your match.')}
+                        {view === 'forgot_password'
+                            ? "Enter your email to receive a reset link."
+                            : isCodeSent
+                                ? `We sent a code to ${formData.code} ${formData.phone}`
+                                : (mode === 'login' ? 'Sign in to sync your stats.' : 'Lock in with your team.')}
                     </p>
                 </div>
 
-                {/* Method Tabs (Hidden if verifying code) */}
-                {!isCodeSent && (
+                {/* Method Tabs (Hidden if verifying code or forgot password) */}
+                {!isCodeSent && view === 'auth' && (
                     <div className="flex p-1.5 bg-white/5 rounded-2xl mb-8 border border-white/10 animate-slide-up backdrop-blur-md" style={{ animationDelay: '200ms' }}>
                         <button
                             onClick={() => handleMethodChange('email')}
@@ -387,7 +444,7 @@ export const Auth: React.FC = () => {
                                     <label className="text-[10px] font-bold uppercase tracking-wider text-white/60 ml-1">Email Address</label>
                                     <GlassInput
                                         type="email"
-                                        placeholder="alex@example.com"
+                                        placeholder="athlete@bind.app"
                                         value={formData.email}
                                         onChange={e => setFormData({ ...formData, email: e.target.value })}
                                         className="bg-black/20 border-white/10 focus:bg-black/40 text-white focus:border-neon-blue/50 placeholder-white/30"
@@ -413,6 +470,18 @@ export const Auth: React.FC = () => {
                                             {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                                         </button>
                                     </div>
+                                    {/* Forgot Password Link - Only Login Mode */}
+                                    {mode === 'login' && (
+                                        <div className="flex justify-end pt-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => setView('forgot_password')}
+                                                className="text-[11px] font-bold text-white/50 hover:text-white transition-colors"
+                                            >
+                                                Forgot Password?
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                                 {mode === 'signup' && (
                                     <div className="space-y-1.5 animate-slide-up">
@@ -485,13 +554,28 @@ export const Auth: React.FC = () => {
                                     ))}
                                 </div>
 
-                                <button
-                                    type="button"
-                                    onClick={() => setIsCodeSent(false)}
-                                    className="text-xs font-bold text-white/50 hover:text-white flex items-center gap-1 mx-auto transition-colors"
-                                >
-                                    <Edit2 size={10} /> Change Number
-                                </button>
+                                <div className="flex flex-col items-center gap-4">
+                                    <button
+                                        type="button"
+                                        onClick={handleResendCode}
+                                        disabled={!canResend}
+                                        className={`
+                                            flex items-center gap-2 text-xs font-bold transition-colors
+                                            ${canResend ? 'text-neon-blue hover:text-white cursor-pointer' : 'text-white/30 cursor-default'}
+                                        `}
+                                    >
+                                        <RefreshCw size={12} className={!canResend ? "animate-spin-slow" : ""} />
+                                        {canResend ? "Resend Code" : `Resend in 00:${resendTimer < 10 ? `0${resendTimer}` : resendTimer}`}
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsCodeSent(false)}
+                                        className="text-xs font-bold text-white/50 hover:text-white flex items-center gap-1 transition-colors"
+                                    >
+                                        <Edit2 size={10} /> Change Number
+                                    </button>
+                                </div>
                             </div>
                         )}
 
@@ -503,7 +587,7 @@ export const Auth: React.FC = () => {
                             </div>
                         )}
 
-                        <div className="pt-4 space-y-3">
+                        <div className="pt-4">
                             <GlassButton type="submit" className="w-full h-14 text-lg shadow-xl shadow-blue-900/20" disabled={isLoading}>
                                 {isLoading ? <Loader2 className="animate-spin" /> : (
                                     <span className="flex items-center justify-center gap-2">
@@ -515,112 +599,59 @@ export const Auth: React.FC = () => {
                                     </span>
                                 )}
                             </GlassButton>
-                            
-                            {mode === 'login' && method === 'email' && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowForgotPassword(true);
-                                        setResetEmail(formData.email);
-                                        setError(null);
-                                        hapticFeedback.light();
-                                    }}
-                                    className="w-full text-sm text-white/50 hover:text-white transition-colors font-medium"
-                                >
-                                    Forgot Password?
-                                </button>
-                            )}
                         </div>
                     </form>
                 </GlassCard>
 
-                {/* Footer & Legal */}
-                <div className="mt-8 text-center space-y-6 animate-slide-up" style={{ animationDelay: '400ms' }}>
-                    <p className="text-white/40 text-sm">
-                        {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
-                        <button
-                            onClick={handleModeSwitch}
-                            className="ml-2 text-white font-bold hover:text-neon-blue transition-colors focus:outline-none"
-                        >
-                            {mode === 'login' ? 'Sign Up' : 'Sign In'}
-                        </button>
-                    </p>
-                </div>
-            </div>
-
-            {/* Forgot Password Modal */}
-            {showForgotPassword && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl animate-fade-in">
-                    <GlassCard className="w-full max-w-md p-6 space-y-4 bg-white/10 backdrop-blur-2xl border-white/20">
-                        {!resetSuccess ? (
-                            <>
-                                <div className="flex items-center justify-between">
-                                    <h3 className="text-xl font-bold text-white">Reset Password</h3>
-                                    <button
-                                        onClick={() => {
-                                            setShowForgotPassword(false);
-                                            setResetEmail('');
-                                            setResetSuccess(false);
-                                            setError(null);
-                                        }}
-                                        className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition"
-                                    >
-                                        <ChevronLeft size={18} />
-                                    </button>
+                {/* FORGOT PASSWORD VIEW */}
+                {view === 'forgot_password' && (
+                    <GlassCard className="p-6 sm:p-8 mt-6 animate-slide-up backdrop-blur-2xl bg-white/[0.05] border-white/20 shadow-2xl">
+                        <form onSubmit={handleForgotPassword} className="space-y-5">
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold uppercase tracking-wider text-white/60 ml-1">Email Address</label>
+                                <GlassInput
+                                    type="email"
+                                    placeholder="athlete@bind.app"
+                                    value={formData.email}
+                                    onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                    className="bg-black/20 border-white/10 focus:bg-black/40 text-white focus:border-neon-blue/50 placeholder-white/30"
+                                    required
+                                />
+                            </div>
+                            {error && (
+                                <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-3 flex items-center gap-3">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                                    <p className="text-red-200 text-sm font-medium">{error}</p>
                                 </div>
-                                <p className="text-white/60 text-sm">
-                                    Enter your email address and we'll send you a link to reset your password.
-                                </p>
-                                <form onSubmit={handleForgotPassword} className="space-y-4">
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] font-bold uppercase tracking-wider text-white/60 ml-1">Email Address</label>
-                                        <GlassInput
-                                            type="email"
-                                            placeholder="your@email.com"
-                                            value={resetEmail}
-                                            onChange={(e) => setResetEmail(e.target.value)}
-                                            className="bg-black/20 border-white/10 focus:bg-black/40 text-white focus:border-neon-blue/50 placeholder-white/30"
-                                            required
-                                        />
-                                    </div>
-                                    {error && (
-                                        <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-3 flex items-center gap-3">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-                                            <p className="text-red-200 text-sm font-medium">{error}</p>
-                                        </div>
+                            )}
+                            <div className="pt-2">
+                                <GlassButton type="submit" className="w-full h-14 text-lg shadow-xl shadow-blue-900/20" disabled={isLoading}>
+                                    {isLoading ? <Loader2 className="animate-spin" /> : (
+                                        <span className="flex items-center justify-center gap-2">
+                                            Send Reset Link <KeyRound size={20} />
+                                        </span>
                                     )}
-                                    <GlassButton type="submit" className="w-full h-12" disabled={isLoading}>
-                                        {isLoading ? <Loader2 className="animate-spin" /> : 'Send Reset Link'}
-                                    </GlassButton>
-                                </form>
-                            </>
-                        ) : (
-                            <>
-                                <div className="text-center space-y-3 py-4">
-                                    <div className="w-16 h-16 rounded-full bg-green-500/20 border border-green-500/50 flex items-center justify-center mx-auto">
-                                        <Mail size={32} className="text-green-400" />
-                                    </div>
-                                    <h3 className="text-xl font-bold text-white">Check Your Email</h3>
-                                    <p className="text-white/60 text-sm">
-                                        We've sent a password reset link to <span className="text-white font-medium">{resetEmail}</span>
-                                    </p>
-                                </div>
-                                <GlassButton
-                                    onClick={() => {
-                                        setShowForgotPassword(false);
-                                        setResetEmail('');
-                                        setResetSuccess(false);
-                                        setError(null);
-                                    }}
-                                    className="w-full h-12"
-                                >
-                                    Done
                                 </GlassButton>
-                            </>
-                        )}
+                            </div>
+                        </form>
                     </GlassCard>
-                </div>
-            )}
+                )}
+
+                {/* Footer & Legal */}
+                {view === 'auth' && (
+                    <div className="mt-8 text-center space-y-6 animate-slide-up" style={{ animationDelay: '400ms' }}>
+                        <p className="text-white/40 text-sm">
+                            {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
+                            <button
+                                onClick={handleModeSwitch}
+                                className="ml-2 text-white font-bold hover:text-neon-blue transition-colors focus:outline-none"
+                            >
+                                {mode === 'login' ? 'Sign Up' : 'Sign In'}
+                            </button>
+                        </p>
+                    </div>
+                )}
+            </div>
         </div>
     );
 };

@@ -39,7 +39,7 @@ export const Events: React.FC = () => {
     useEffect(() => {
         const loadEvents = async () => {
             const fetchedEvents = await clubService.getEvents();
-            
+
             // Fetch attendee data for each event
             const formattedEvents = await Promise.all(fetchedEvents.map(async (e) => {
                 let attendeeAvatars: string[] = [];
@@ -99,7 +99,7 @@ export const Events: React.FC = () => {
     const toggleRSVP = async (e: React.MouseEvent, eventId: string) => {
         e.stopPropagation();
         hapticFeedback.medium();
-        
+
         const event = events.find(ev => ev.id === eventId);
         if (!event || !user) return;
 
@@ -118,9 +118,9 @@ export const Events: React.FC = () => {
         }
 
         // Optimistic update
-        setEvents(prev => prev.map(ev => 
-            ev.id === eventId 
-                ? { ...ev, attendanceStatus: newStatus, isJoined: newStatus === 'going', attendees: newAttendees }
+        setEvents(prev => prev.map(ev =>
+            ev.id === eventId
+                ? { ...ev, attendanceStatus: newStatus, isJoined: newStatus !== 'guest', attendees: newAttendees }
                 : ev
         ));
 
@@ -152,8 +152,8 @@ export const Events: React.FC = () => {
         } catch (error) {
             console.error('Error updating RSVP:', error);
             // Rollback on error
-            setEvents(prev => prev.map(ev => 
-                ev.id === eventId 
+            setEvents(prev => prev.map(ev =>
+                ev.id === eventId
                     ? { ...ev, attendanceStatus: currentStatus, isJoined: currentStatus === 'going', attendees: event.attendees }
                     : ev
             ));
@@ -295,8 +295,9 @@ export const Events: React.FC = () => {
                     return (
                         <div
                             key={event.id}
+                            onClick={() => navigate(`/events/${event.id}`, { state: { event } })}
                             className={`
-                    p-5 rounded-[32px] border relative overflow-hidden group animate-slide-up backdrop-blur-xl
+                    p-5 rounded-[32px] border relative overflow-hidden group animate-slide-up backdrop-blur-xl cursor-pointer transition-transform hover:scale-[1.02]
                     ${isLight ? 'bg-white/60 border-slate-200 shadow-lg' : 'bg-white/5 border-white/10 shadow-xl'}
                 `}
                             style={{ animationDelay: `${index * 100}ms` }}

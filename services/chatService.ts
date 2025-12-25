@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
 import { Message } from '../types';
+import { presenceService } from './presenceService';
+import { rateLimiter, RATE_LIMITS } from '../utils/rateLimit';
 
 /**
  * Real-time Chat Service using Supabase
@@ -9,6 +11,7 @@ import { Message } from '../types';
  * - Typing indicators
  * - Message persistence
  * - AI safety checks integration
+ * - Rate limiting to prevent spam
  */
 
 export class ChatService {
@@ -47,16 +50,24 @@ export class ChatService {
 
     /**
      * Send a new message with delivery guarantee and retry queue
+     * Includes rate limiting to prevent spam
      */
     async sendMessage(
         senderId: string,
         recipientId: string,
         content: string,
-        type: 'text' | 'image' | 'invite' | 'ai_plan' = 'text',
+        type: 'text' | 'image' | 'invite' | 'ai_plan' | 'photo_comment' = 'text',
         metadata?: any
     ): Promise<Message | null> {
+        // Rate limiting check
+        if (!rateLimiter.canMakeRequest(`message_${senderId}`, RATE_LIMITS.MESSAGE)) {
+            console.warn('Rate limit exceeded for messages');
+            return null;
+        }
+
         const messageId = `msg_${senderId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
+
+
         const messageData = {
             id: messageId,
             sender_id: senderId,
@@ -89,7 +100,7 @@ export class ChatService {
 
             // Remove from pending queue on success
             this.removeFromPendingQueue(messageId);
-            
+
             return this.formatMessage(data);
         } catch (error) {
             console.error('Send message error:', error);
@@ -118,11 +129,31 @@ export class ChatService {
 
     /**
      * Get pending message queue
+     * Includes TTL filter - messages older than 24 hours are automatically removed
      */
     private getPendingQueue(): any[] {
+        const MAX_QUEUE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours TTL
+
         try {
             const stored = localStorage.getItem('sportpulse_message_queue');
-            return stored ? JSON.parse(stored) : [];
+            if (!stored) return [];
+
+            const queue = JSON.parse(stored);
+            const now = Date.now();
+
+            // Filter out expired messages (older than 24 hours)
+            const validMessages = queue.filter((m: any) => {
+                const messageAge = now - (m.timestamp || m.lastAttempt || 0);
+                return messageAge < MAX_QUEUE_AGE_MS;
+            });
+
+            // If any messages were expired, update localStorage
+            if (validMessages.length !== queue.length) {
+                localStorage.setItem('sportpulse_message_queue', JSON.stringify(validMessages));
+                console.log(`🗑️ Removed ${queue.length - validMessages.length} expired messages from queue`);
+            }
+
+            return validMessages;
         } catch {
             return [];
         }
@@ -165,7 +196,7 @@ export class ChatService {
      */
     async retryPendingMessages(): Promise<void> {
         const queue = this.getPendingQueue();
-        
+
         if (queue.length === 0) {
             return;
         }
@@ -182,7 +213,7 @@ export class ChatService {
             // Skip if tried recently (exponential backoff)
             const timeSinceLastAttempt = Date.now() - message.lastAttempt;
             const backoffDelay = Math.min(1000 * Math.pow(2, message.retryCount), 30000);
-            
+
             if (timeSinceLastAttempt < backoffDelay) {
                 continue;
             }
@@ -275,16 +306,16 @@ export class ChatService {
                 },
                 (payload) => {
                     const messageId = payload.new?.id;
-                    
+
                     // Deduplication: ignore if already seen
                     if (seenMessageIds.has(messageId)) {
                         console.log('🔄 Duplicate message ignored:', messageId);
                         return;
                     }
-                    
+
                     seenMessageIds.add(messageId);
                     console.log('📨 New message received:', messageId);
-                    
+
                     // Fetch updated messages
                     this.getMessages(currentUserId, otherUserId).then(callback);
                 }
@@ -299,22 +330,22 @@ export class ChatService {
                 },
                 (payload) => {
                     const messageId = payload.new?.id;
-                    
+
                     // Deduplication
                     if (seenMessageIds.has(messageId)) {
                         return;
                     }
-                    
+
                     seenMessageIds.add(messageId);
                     console.log('📤 Message sent:', messageId);
-                    
+
                     // Fetch updated messages
                     this.getMessages(currentUserId, otherUserId).then(callback);
                 }
             )
             .subscribe((status) => {
                 console.log('📡 Subscription status:', status);
-                
+
                 // Retry pending on reconnect
                 if (status === 'SUBSCRIBED') {
                     this.retryPendingMessages();
@@ -338,12 +369,12 @@ export class ChatService {
      */
     cleanupAllSubscriptions(): void {
         console.log(`🧹 Cleaning up ${this.activeSubscriptions.size} active subscriptions`);
-        
+
         this.activeSubscriptions.forEach((channel, channelName) => {
             console.log('Unsubscribing from:', channelName);
             channel.unsubscribe();
         });
-        
+
         this.activeSubscriptions.clear();
     }
 
@@ -444,7 +475,6 @@ export class ChatService {
             isAiGenerated: false,
             isFlagged: !dbMessage.is_safe,
             isRead: dbMessage.is_read,
-            metadata: dbMessage.metadata,
             // Support for invite details
             ...(dbMessage.metadata?.inviteDetails && {
                 inviteDetails: dbMessage.metadata.inviteDetails
@@ -508,6 +538,22 @@ export class ChatService {
         } catch (e) {
             console.error('Error saving local message:', e);
         }
+    }
+
+    // ============ TYPING INDICATORS ============
+
+    /**
+     * Send typing indicator to chat partner
+     */
+    async sendTypingIndicator(toUserId: string, isTyping: boolean): Promise<void> {
+        await presenceService.sendTypingIndicator(toUserId, isTyping);
+    }
+
+    /**
+     * Subscribe to typing status from chat partner
+     */
+    subscribeToTyping(fromUserId: string, callback: (isTyping: boolean) => void): () => void {
+        return presenceService.subscribeToTyping(fromUserId, callback);
     }
 
     /**

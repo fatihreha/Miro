@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { GlassCard, GlassButton, GlassInput, GlassSelectable } from '../components/ui/Glass';
 import { User, SportType, Booking } from '../types';
-import { ArrowLeft, Star, MapPin, CheckCircle2, Share2, Clock, Calendar, DollarSign, X, MessageCircle, Award, Sparkles, ShieldAlert, ChevronRight, Edit2, Save, Plus, TrendingUp, Users, Bell, Check, CreditCard, Wallet } from 'lucide-react';
+import { ArrowLeft, Star, MapPin, CheckCircle2, Share2, Clock, Calendar, DollarSign, X, MessageCircle, Award, Sparkles, ShieldAlert, ChevronRight, Edit2, Save, Plus, TrendingUp, Check, CreditCard } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { notificationService } from '../services/notificationService';
 import { hapticFeedback } from '../services/hapticService';
@@ -13,6 +13,7 @@ import { trainerService } from '../services/trainerService';
 import { useAuth } from '../context/AuthContext';
 import { chatService } from '../services/chatService';
 import { supabase } from '../services/supabase';
+import { userService } from '../services/userService';
 
 // Mock data removed
 
@@ -28,11 +29,11 @@ const generateTimeSlotsFromAvailability = (availability: { days: string[], start
     if (!availability || !availability.startHour || !availability.endHour) {
         return DEFAULT_SLOTS;
     }
-    
+
     const slots: string[] = [];
     const [startH] = availability.startHour.split(':').map(Number);
     const [endH] = availability.endHour.split(':').map(Number);
-    
+
     for (let hour = startH; hour < endH; hour++) {
         const period = hour >= 12 ? 'PM' : 'AM';
         const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
@@ -41,7 +42,7 @@ const generateTimeSlotsFromAvailability = (availability: { days: string[], start
             slots.push(`${displayHour.toString().padStart(2, '0')}:30 ${period}`);
         }
     }
-    
+
     return slots.length > 0 ? slots : DEFAULT_SLOTS;
 };
 
@@ -51,6 +52,25 @@ const SPECIALTIES_LIST = [
 ];
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+type Inquiry = {
+    id: string;
+    senderId: string;
+    senderName: string;
+    avatar: string;
+    lastMessage: string;
+    time: string;
+    unread: number;
+};
+
+type Review = {
+    id: string;
+    authorName: string;
+    authorAvatar: string;
+    rating: number;
+    text: string;
+    date: string;
+};
 
 // Helper to generate next 14 days
 const getNextDays = (days: number) => {
@@ -83,14 +103,29 @@ export const TrainerDetail: React.FC = () => {
     const [selectedDateObj, setSelectedDateObj] = useState<Date>(new Date());
     const [bookingTime, setBookingTime] = useState('');
     const [calendarDays] = useState(getNextDays(14));
-    
+
     // Available slots based on trainer's availability
-    const availableSlots = trainer?.availability 
+    const availableSlots = trainer?.availability
         ? generateTimeSlotsFromAvailability(trainer.availability)
         : DEFAULT_SLOTS;
 
+    const toTime24h = (slot: string) => {
+        if (!slot) return '';
+        const match = slot.match(/(\d{1,2}):(\d{2})\s?(AM|PM)/i);
+        if (!match) return slot;
+        let hour = parseInt(match[1], 10);
+        const minute = match[2];
+        const meridiem = match[3].toUpperCase();
+        if (meridiem === 'PM' && hour !== 12) hour += 12;
+        if (meridiem === 'AM' && hour === 12) hour = 0;
+        return `${hour.toString().padStart(2, '0')}:${minute}`;
+    };
+
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+    const [isSharing, setIsSharing] = useState(false);
+
+    const [isLoadingTrainer, setIsLoadingTrainer] = useState(false);
 
     // Edit Mode States
     const [isEditing, setIsEditing] = useState(false);
@@ -106,78 +141,128 @@ export const TrainerDetail: React.FC = () => {
 
     // Dashboard Data
     const [myBookings, setMyBookings] = useState<Booking[]>([]);
+    const [inquiries, setInquiries] = useState<Inquiry[]>([]);
 
-    const [inquiries, setInquiries] = useState<any[]>([]);
+    // Reviews
+    const [reviews, setReviews] = useState<Review[]>([]);
+    const [showAllReviewsModal, setShowAllReviewsModal] = useState(false);
 
     // Load Trainer Data
     useEffect(() => {
         const loadTrainer = async () => {
             if (!trainer && trainerId) {
+                setIsLoadingTrainer(true);
                 const data = await trainerService.getTrainerById(trainerId);
                 if (data) setTrainer(data);
+                setIsLoadingTrainer(false);
             }
         };
         loadTrainer();
     }, [trainerId, trainer]);
 
+    useEffect(() => {
+        if (currentUser && trainer && currentUser.id === trainer.id) {
+            setViewMode('dashboard');
+        }
+    }, [currentUser, trainer]);
+
     // Load Dashboard Data (Owner Only)
     useEffect(() => {
-        if (isOwner && trainer) {
-            // Load Bookings
+        if (isOwner && trainer && currentUser) {
             const loadBookings = async () => {
-                const data = await trainerService.getTrainerBookings(trainer.id);
-                // Map Supabase data to component format
-                const formatted = data.map(b => ({
-                    id: b.id,
-                    clientId: b.user_id,
-                    clientName: b.user?.name || 'Unknown',
-                    clientAvatar: b.user?.avatar_url || 'https://i.pravatar.cc/150',
-                    date: new Date(b.scheduled_date).toLocaleDateString(),
-                    time: b.scheduled_time,
-                    status: b.status,
-                    price: b.price
+                const { data, error } = await supabase
+                    .from('bookings')
+                    .select('id, user_id, status, scheduled_date, scheduled_time, price')
+                    .eq('trainer_id', trainer.id)
+                    .order('scheduled_date', { ascending: false })
+                    .order('scheduled_time', { ascending: true });
+
+                if (error || !data) return;
+
+                const formatted: Booking[] = await Promise.all(data.map(async (b) => {
+                    const user = await userService.getUserById(b.user_id);
+                    return {
+                        id: b.id,
+                        clientId: b.user_id,
+                        clientName: user?.name || 'Unknown',
+                        clientAvatar: user?.avatarUrl || 'https://i.pravatar.cc/150',
+                        date: new Date(b.scheduled_date).toLocaleDateString(),
+                        time: b.scheduled_time,
+                        status: b.status,
+                        price: b.price
+                    } as Booking;
                 }));
                 setMyBookings(formatted);
             };
-            loadBookings();
 
-            // Load Inquiries
             const loadInquiries = async () => {
-                const chats = await chatService.getConversations(currentUser.id);
-                // We need to fetch user details for each chat partner
-                // For now, we'll just use what we have or fetch individually if needed
-                // Assuming chatService returns basic info, but we might need to enhance it
-                // Actually chatService.getConversations returns { partnerId, lastMessage, timestamp }
-                // We need name and avatar. 
-                // Let's fetch them.
-                const enhancedChats = await Promise.all(chats.map(async (chat) => {
-                    const chatUser = await trainerService.getTrainerById(chat.partnerId) || await import('../services/userService').then(m => m.userService.getUserById(chat.partnerId));
-                    
-                    // Get unread count from supabase
-                    const { count: unreadCount } = await import('../services/supabase').then(m => 
-                        m.supabase
-                            .from('messages')
-                            .select('*', { count: 'exact', head: true })
-                            .eq('recipient_id', currentUser.id)
-                            .eq('sender_id', chat.partnerId)
-                            .eq('is_read', false)
-                    );
+                // Fetch latest messages to build conversations
+                const { data, error } = await supabase
+                    .from('messages')
+                    .select('id, sender_id, recipient_id, content, created_at, is_read')
+                    .or(`recipient_id.eq.${trainer.id},sender_id.eq.${trainer.id}`)
+                    .order('created_at', { ascending: false });
 
-                    return {
-                        id: chat.partnerId,
-                        senderId: chat.partnerId,
-                        senderName: chatUser?.name || 'User',
-                        avatar: chatUser?.avatarUrl || 'https://i.pravatar.cc/150',
-                        lastMessage: chat.lastMessage,
-                        time: new Date(chat.timestamp).toLocaleTimeString(),
-                        unread: unreadCount || 0
-                    };
-                }));
-                setInquiries(enhancedChats);
+                if (error || !data) return;
+
+                const conversations = new Map<string, Inquiry>();
+
+                for (const msg of data) {
+                    const partnerId = msg.sender_id === trainer.id ? msg.recipient_id : msg.sender_id;
+                    if (!partnerId || conversations.has(partnerId)) continue;
+
+                    // fetch partner profile
+                    const partner = await userService.getUserById(partnerId);
+                    const unreadRes = await supabase
+                        .from('messages')
+                        .select('id', { head: true, count: 'exact' })
+                        .eq('recipient_id', trainer.id)
+                        .eq('sender_id', partnerId)
+                        .eq('is_read', false);
+
+                    conversations.set(partnerId, {
+                        id: partnerId,
+                        senderId: partnerId,
+                        senderName: partner?.name || 'User',
+                        avatar: partner?.avatarUrl || 'https://i.pravatar.cc/150',
+                        lastMessage: msg.content,
+                        time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        unread: unreadRes.count || 0
+                    });
+                }
+
+                setInquiries(Array.from(conversations.values()));
             };
+
+            loadBookings();
             loadInquiries();
         }
     }, [isOwner, trainer, currentUser]);
+
+    useEffect(() => {
+        const loadReviews = async () => {
+            if (!trainer) return;
+            const { data, error } = await supabase
+                .from('reviews')
+                .select('id, rating, comment, created_at, user:users(name, avatar_url)')
+                .eq('trainer_id', trainer.id)
+                .order('created_at', { ascending: false })
+                .limit(50);
+
+            if (error || !data) return;
+
+            const mapped: Review[] = data.map((r: any) => ({
+                id: r.id,
+                rating: r.rating,
+                text: r.comment,
+                date: new Date(r.created_at).toLocaleDateString(),
+                authorName: r.user?.name || 'User',
+                authorAvatar: r.user?.avatar_url || 'https://i.pravatar.cc/150'
+            }));
+            setReviews(mapped);
+        };
+        loadReviews();
+    }, [trainer]);
 
     useEffect(() => {
         if (trainer) {
@@ -191,6 +276,14 @@ export const TrainerDetail: React.FC = () => {
             }
         }
     }, [trainer]);
+
+    if (isLoadingTrainer) {
+        return (
+            <div className="flex items-center justify-center h-full text-white/50">
+                Loading trainer...
+            </div>
+        );
+    }
 
     if (!trainer) {
         return (
@@ -239,7 +332,7 @@ export const TrainerDetail: React.FC = () => {
         // Persist to database
         try {
             await trainerService.updateAvailability(trainer.id, editAvailability);
-            
+
             // Also update user profile
             await supabase
                 .from('users')
@@ -294,19 +387,40 @@ export const TrainerDetail: React.FC = () => {
         navigate(`/chat/${trainer.id}`);
     };
 
+    const handleShare = async () => {
+        if (!trainer) return;
+        setIsSharing(true);
+        const shareUrl = `${window.location.origin}/trainer/${trainer.id}`;
+        try {
+            if (navigator.share) {
+                await navigator.share({ title: trainer.name, text: 'Check out this trainer on Bind', url: shareUrl });
+            } else {
+                await navigator.clipboard.writeText(shareUrl);
+                notificationService.showNotification('Link copied', { body: 'Trainer profile link copied to clipboard.' });
+            }
+            hapticFeedback.success();
+        } catch (err) {
+            console.error('Share failed', err);
+        } finally {
+            setIsSharing(false);
+        }
+    };
+
     const handleConfirmBooking = async () => {
-        if (!currentUser || !trainer) return;
-        
+        if (!currentUser || !trainer || !bookingTime) return;
+
         hapticFeedback.success();
         const dateStr = selectedDateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-        
+
+        const normalizedTime = toTime24h(bookingTime);
+
         // Save booking to database
         try {
             await trainerService.bookSession({
                 userId: currentUser.id,
                 trainerId: trainer.id,
                 scheduledDate: selectedDateObj.toISOString().split('T')[0],
-                scheduledTime: bookingTime,
+                scheduledTime: normalizedTime,
                 price: trainer.hourlyRate || 60
             });
         } catch (error) {
@@ -322,19 +436,19 @@ export const TrainerDetail: React.FC = () => {
 
     const handleAcceptBooking = async (bookingId: string) => {
         hapticFeedback.success();
-        
-        // Optimistic update
-        setMyBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'confirmed' } : b));
-        notificationService.showNotification("Booking Confirmed", { body: "Client has been notified." });
+
+        // Optimistic update: mark as completed
+        setMyBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'completed' } : b));
+        notificationService.showNotification("Booking Updated", { body: "Marked as completed." });
 
         // Persist to database
         try {
             await supabase
                 .from('bookings')
-                .update({ status: 'confirmed' })
+                .update({ status: 'completed' })
                 .eq('id', bookingId);
         } catch (error) {
-            console.error('Error confirming booking:', error);
+            console.error('Error updating booking:', error);
         }
     };
 
@@ -442,11 +556,11 @@ export const TrainerDetail: React.FC = () => {
                                 <div className="flex-1">
                                     <div className={`font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{booking.clientName}</div>
                                     <div className={`text-xs ${isLight ? 'text-slate-500' : 'text-white/60'}`}>{booking.date} • {booking.time}</div>
-                                    <div className={`mt-1 text-[10px] font-bold uppercase tracking-wider ${booking.status === 'confirmed' ? 'text-green-500' : 'text-amber-500'}`}>
+                                    <div className={`mt-1 text-[10px] font-bold uppercase tracking-wider ${booking.status === 'completed' ? 'text-green-500' : 'text-amber-500'}`}>
                                         {booking.status}
                                     </div>
                                 </div>
-                                {booking.status === 'pending' && (
+                                {booking.status === 'upcoming' && (
                                     <button onClick={() => handleAcceptBooking(booking.id)} className="w-10 h-10 rounded-full bg-green-500 text-white flex items-center justify-center shadow-lg hover:scale-110 transition">
                                         <Check size={20} />
                                     </button>
@@ -532,7 +646,13 @@ export const TrainerDetail: React.FC = () => {
                         ) : (
                             <>
                                 <button onClick={() => setIsReportModalOpen(true)} className="w-10 h-10 rounded-full bg-black/20 backdrop-blur-md flex items-center justify-center text-red-400 hover:bg-white/10 transition"><ShieldAlert size={20} /></button>
-                                <button className="w-10 h-10 rounded-full bg-black/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/10 transition"><Share2 size={20} /></button>
+                                <button
+                                    onClick={handleShare}
+                                    disabled={isSharing}
+                                    className="w-10 h-10 rounded-full bg-black/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/10 transition disabled:opacity-50"
+                                >
+                                    <Share2 size={20} />
+                                </button>
                             </>
                         )}
                     </div>
@@ -641,7 +761,7 @@ export const TrainerDetail: React.FC = () => {
                         {calendarDays.slice(0, 7).map((date) => {
                             const dayName = getDayName(date);
                             const dateNum = getDayNum(date);
-                            const isAvailable = trainer.availability?.days.includes(dayName) || true; // Default true for demo
+                            const isAvailable = trainer.availability?.days?.includes(dayName) ?? false;
 
                             if (!isAvailable) return null;
 
@@ -685,18 +805,22 @@ export const TrainerDetail: React.FC = () => {
                 <GlassCard className={`p-5 animate-slide-up ${isLight ? 'bg-white/60 border-slate-200' : 'bg-white/5 border-white/10'}`} style={{ animationDelay: '300ms' }}>
                     <div className="flex justify-between items-center mb-4">
                         <h3 className={`font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>Client Reviews</h3>
-                        <button className="text-xs font-bold text-neon-blue hover:underline">View All</button>
+                        <button onClick={() => setShowAllReviewsModal(true)} className="text-xs font-bold text-neon-blue hover:underline">View All</button>
                     </div>
                     <div className="space-y-4">
-                        {[1, 2].map(i => (
-                            <div key={i} className="flex gap-3 pb-3 border-b border-dashed border-white/10 last:border-0 last:pb-0">
-                                <img src={`https://i.pravatar.cc/150?u=${i + 20}`} className="w-8 h-8 rounded-full" alt="" />
+                        {(reviews.length ? reviews.slice(0, 2) : []).map(review => (
+                            <div key={review.id} className="flex gap-3 pb-3 border-b border-dashed border-white/10 last:border-0 last:pb-0">
+                                <img src={review.authorAvatar} className="w-8 h-8 rounded-full" alt="" />
                                 <div>
-                                    <div className={`text-xs font-bold mb-0.5 ${isLight ? 'text-slate-900' : 'text-white'}`}>Satisfied Client</div>
-                                    <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-500' : 'text-white/50'}`}>Great session! Really pushed me to my limits. Highly recommend for anyone looking to improve.</p>
+                                    <div className={`text-xs font-bold mb-0.5 ${isLight ? 'text-slate-900' : 'text-white'}`}>{review.authorName}</div>
+                                    <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-500' : 'text-white/50'}`}>{review.text}</p>
+                                    <div className={`text-[9px] opacity-50 ${isLight ? 'text-slate-400' : 'text-white/50'}`}>{review.date}</div>
                                 </div>
                             </div>
                         ))}
+                        {reviews.length === 0 && (
+                            <div className={`text-xs ${isLight ? 'text-slate-500' : 'text-white/50'}`}>No reviews yet.</div>
+                        )}
                     </div>
                 </GlassCard>
             </div>
@@ -775,6 +899,44 @@ export const TrainerDetail: React.FC = () => {
                         <GlassButton onClick={() => setShowSpecialtyModal(false)} className="w-full flex-shrink-0">
                             Done
                         </GlassButton>
+                    </GlassCard>
+                </div>
+            )}
+
+            {/* View All Reviews Modal */}
+            {showAllReviewsModal && (
+                <div className={`fixed inset-0 z-[90] flex items-end sm:items-center justify-center sm:p-6 animate-fade-in backdrop-blur-md ${isLight ? 'bg-slate-900/20' : 'bg-black/80'}`}>
+                    <div className="absolute inset-0" onClick={() => setShowAllReviewsModal(false)} />
+                    <GlassCard className={`w-full max-w-md p-6 relative z-10 animate-slide-up rounded-t-[32px] sm:rounded-[32px] max-h-[90vh] flex flex-col ${isLight ? 'bg-white' : 'bg-[#18181b]'}`}>
+                        <div className="flex justify-between items-center mb-6 flex-shrink-0">
+                            <h3 className={`text-xl font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>All Reviews ({reviews.length})</h3>
+                            <button onClick={() => setShowAllReviewsModal(false)}><X size={24} className={isLight ? 'text-slate-400' : 'text-white/40'} /></button>
+                        </div>
+                        <div className="overflow-y-auto flex-1 space-y-4 no-scrollbar">
+                            {reviews.length === 0 ? (
+                                <div className="text-center py-10 opacity-50">No reviews yet.</div>
+                            ) : (
+                                reviews.map((review) => (
+                                    <div key={review.id} className={`p-4 rounded-2xl border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/5'}`}>
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div className="flex items-center gap-3">
+                                                <img src={review.authorAvatar} className="w-10 h-10 rounded-full object-cover" alt="" />
+                                                <div>
+                                                    <div className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{review.authorName}</div>
+                                                    <div className={`text-[10px] ${isLight ? 'text-slate-400' : 'text-white/40'}`}>{review.date}</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-0.5 text-amber-400">
+                                                {[...Array(5)].map((_, i) => (
+                                                    <Star key={i} size={12} fill={i < review.rating ? "currentColor" : "none"} className={i >= review.rating ? (isLight ? "text-slate-200" : "text-white/10") : ""} />
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <p className={`text-sm leading-relaxed ${isLight ? 'text-slate-600' : 'text-white/70'}`}>{review.text}</p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
                     </GlassCard>
                 </div>
             )}

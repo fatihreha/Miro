@@ -113,6 +113,72 @@ export class ClubService {
     }
 
     /**
+     * Update an existing event
+     */
+    async updateEvent(eventId: string, updates: {
+        title?: string;
+        description?: string;
+        rules?: string[];
+        notes?: string;
+        date?: string;
+        time?: string;
+        location?: string;
+        sport?: string;
+    }): Promise<boolean> {
+        try {
+            const { error } = await supabase
+                .from('events')
+                .update({
+                    ...updates,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', eventId);
+
+            if (error) {
+                console.error('Error updating event:', error);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Update event error:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Get event by ID
+     */
+    async getEventById(eventId: string): Promise<any | null> {
+        try {
+            const { data, error } = await supabase
+                .from('events')
+                .select(`
+                    *,
+                    host:users!events_host_id_fkey(*),
+                    attendeeAvatars:users!events_attendees_fkey(avatar_url)
+                `)
+                .eq('id', eventId)
+                .single();
+
+            if (error) {
+                console.error('Error fetching event:', error);
+                return null;
+            }
+
+            // Transform if needed, e.g. mapping attendees
+            // Note: The select for attendeeAvatars above is illustrative, 
+            // supabase relations might differ based on your schema (many-to-many usually via join table).
+            // Assuming simplified logic or direct column for now as per getEvents structure.
+
+            return data;
+        } catch (error) {
+            console.error('Get event error:', error);
+            return null;
+        }
+    }
+
+    /**
      * Get club by ID with full details
      */
     async getClubById(clubId: string): Promise<any | null> {
@@ -375,6 +441,38 @@ export class ClubService {
                     filter: `club_id=eq.${clubId}`
                 },
                 callback
+            )
+            .subscribe();
+
+        this.activeSubscriptions.set(channelName, channel);
+
+        return () => {
+            channel.unsubscribe();
+            this.activeSubscriptions.delete(channelName);
+        };
+    }
+
+    /**
+     * Subscribe to club join requests (for club admins)
+     */
+    subscribeToClubJoinRequests(clubId: string, callback: (requests: any[]) => void): () => void {
+        const channelName = `club_join_requests:${clubId}`;
+
+        const channel = supabase
+            .channel(channelName)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'club_join_requests',
+                    filter: `club_id=eq.${clubId}`
+                },
+                async () => {
+                    // Fetch updated join requests
+                    const requests = await this.getJoinRequests(clubId);
+                    callback(requests);
+                }
             )
             .subscribe();
 

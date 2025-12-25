@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GlassCard, GlassButton, GlassSelectable } from '../components/ui/Glass';
-import { Heart, X, MapPin, Filter, Sparkles, ChevronUp, ChevronDown, Star, Send, Check, Zap, Clock, Crown, SlidersHorizontal, Ruler, Calendar, RotateCcw, Users, Activity, Lock } from 'lucide-react';
+import { Heart, X, MapPin, Filter, Sparkles, ChevronUp, ChevronDown, Star, Send, Check, Zap, Clock, Crown, SlidersHorizontal, Ruler, Calendar, RotateCcw, Users, Activity, Lock, Rocket } from 'lucide-react';
 import { User, SportType } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { generateIcebreaker } from '../services/geminiService';
@@ -11,6 +11,9 @@ import { useTheme } from '../context/ThemeContext';
 import { useLayout } from '../context/LayoutContext';
 import { matchService } from '../services/matchService';
 import { realtimeManager } from '../services/realtimeManager';
+import { TutorialOverlay, TutorialStep } from '../components/ui/TutorialOverlay';
+import { notificationService } from '../services/notificationService';
+import { analytics, ANALYTICS_EVENTS } from '../utils/analytics';
 
 // Mock data removed
 
@@ -520,9 +523,49 @@ const LimitReachedModal: React.FC<{ isOpen: boolean, onClose: () => void, naviga
     );
 };
 
+// Tutorial Steps
+const TUTORIAL_STEPS: TutorialStep[] = [
+    {
+        targetId: 'swipe-card',
+        title: 'The Arena',
+        description: 'This is your feed. Swipe right to connect, left to pass. Tap on the card to view full profile details.',
+        position: 'auto'
+    },
+    {
+        targetId: 'home-filter-btn',
+        title: 'Scouting Report',
+        description: 'Filter athletes by sport, skill level, and distance to find your perfect training partner.',
+        position: 'bottom'
+    },
+    {
+        targetId: 'nav-matches',
+        title: 'The Huddle',
+        description: 'View your matches, chat, send workout invites, and manage incoming requests here.',
+        position: 'top'
+    },
+    {
+        targetId: 'nav-map',
+        title: 'Ground Zero',
+        description: 'Discover nearby gyms, courts, and training spots. Long press to add your own locations.',
+        position: 'top'
+    },
+    {
+        targetId: 'nav-clubs',
+        title: 'Tribes',
+        description: 'Join local sports communities or create your own events. Pro members can found new Clubs.',
+        position: 'top'
+    },
+    {
+        targetId: 'nav-profile',
+        title: 'The Locker',
+        description: 'Track your XP, manage badges, edit your bio, and configure app settings.',
+        position: 'top'
+    }
+];
+
 export const Home: React.FC = () => {
     const navigate = useNavigate();
-    const { user: currentUser, consumeSwipe } = useAuth();
+    const { user: currentUser, consumeSwipe, logout } = useAuth();
     const { t, theme } = useTheme();
     const { setTabBarVisible } = useLayout();
     const isLight = theme === 'light';
@@ -548,11 +591,70 @@ export const Home: React.FC = () => {
     // Swipe Limiting State
     const [showLimitModal, setShowLimitModal] = useState(false);
 
-    // Hide/Show Tab Bar based on Filter Visibility
+    // Tutorial State
+    const [showTutorial, setShowTutorial] = useState(false);
+
+    // Boost Feature State
+    const [isBoostActive, setIsBoostActive] = useState(false);
+    const [boostTimeLeft, setBoostTimeLeft] = useState(0);
+    const [showBoostModal, setShowBoostModal] = useState(false);
+
+    // Hide/Show Tab Bar based on Filter Visibility OR Match Overlay OR Boost Modal
     useEffect(() => {
-        setTabBarVisible(!showFilters);
+        // Explicitly manage tab bar visibility
+        const shouldHide = showFilters || matchOverlay.show || showBoostModal;
+        setTabBarVisible(!shouldHide);
+
         return () => setTabBarVisible(true); // Safety reset
-    }, [showFilters, setTabBarVisible]);
+    }, [showFilters, matchOverlay.show, showBoostModal, setTabBarVisible]);
+
+    // Tutorial Trigger - Show for new users
+    useEffect(() => {
+        const hasSeen = localStorage.getItem('pulse_tutorial_complete');
+        if (!hasSeen && currentUser && allFetchedUsers.length > 0) {
+            const timer = setTimeout(() => {
+                const targetEl = document.getElementById('swipe-card');
+                if (targetEl) {
+                    setShowTutorial(true);
+                }
+            }, 1200);
+            return () => clearTimeout(timer);
+        }
+    }, [currentUser, allFetchedUsers]);
+
+    // Boost Timer Logic
+    useEffect(() => {
+        let interval: any;
+        if (isBoostActive && boostTimeLeft > 0) {
+            interval = setInterval(() => {
+                setBoostTimeLeft(prev => prev - 1);
+            }, 1000);
+        } else if (boostTimeLeft === 0) {
+            setIsBoostActive(false);
+        }
+        return () => clearInterval(interval);
+    }, [isBoostActive, boostTimeLeft]);
+
+    // Real-time Match Notifications
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const subscriptionKey = realtimeManager.subscribeToMatches(
+            currentUser.id,
+            (newMatch: any) => {
+                setMatchOverlay({
+                    show: true,
+                    user: newMatch.partner,
+                    isSuper: newMatch.isSuper || false
+                });
+                notificationService.showNotification('New Match!', {
+                    body: `You matched with ${newMatch.partner.name}`
+                });
+            }
+        );
+
+        return () => realtimeManager.unsubscribe(subscriptionKey);
+    }, [currentUser]);
 
     // Fetch Users from Supabase with Filters
     useEffect(() => {
@@ -652,8 +754,24 @@ export const Home: React.FC = () => {
                     action
                 );
 
+                // Track swipe event
+                const swipeEvent = action === 'superlike'
+                    ? ANALYTICS_EVENTS.SWIPE_SUPERLIKE
+                    : ANALYTICS_EVENTS.SWIPE_LIKE;
+                analytics.track(swipeEvent, {
+                    targetUserId: currentUserCard.id,
+                    sport: currentUserCard.interests?.[0]
+                });
+
                 // If it's a match, show overlay with real data
                 if (matched && matchData) {
+                    // Track match event
+                    analytics.track(ANALYTICS_EVENTS.MATCH_CREATED, {
+                        matchId: matchData.id,
+                        targetUserId: currentUserCard.id,
+                        compatibilityScore: matchData.compatibility_score
+                    });
+
                     setTimeout(() => {
                         setMatchOverlay({
                             show: true,
@@ -675,6 +793,10 @@ export const Home: React.FC = () => {
             // Record pass
             try {
                 await matchService.swipeUser(currentUser.id, currentUserCard.id, 'pass');
+                // Track pass event
+                analytics.track(ANALYTICS_EVENTS.SWIPE_PASS, {
+                    targetUserId: currentUserCard.id
+                });
             } catch (error) {
                 console.error('Error recording pass:', error);
             }
@@ -707,11 +829,37 @@ export const Home: React.FC = () => {
         }
     };
 
+    const handleTutorialComplete = async () => {
+        localStorage.setItem('pulse_tutorial_complete', 'true');
+        setShowTutorial(false);
+        hapticFeedback.success();
+        notificationService.showNotification('Tutorial Complete! 🎉', { body: '+50 XP earned!' });
+    };
+
+    const handleActivateBoost = () => {
+        if (!currentUser?.isPremium) {
+            navigate('/premium');
+            setShowBoostModal(false);
+            return;
+        }
+        setIsBoostActive(true);
+        setBoostTimeLeft(300); // 5 minutes
+        setShowBoostModal(false);
+        hapticFeedback.success();
+        notificationService.showNotification('Boost Activated! 🚀', { body: 'Your profile is now boosted for 5 minutes' });
+    };
+
+    const formatTime = (seconds: number): string => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
     if (visibleUsers.length === 0) {
         const isFilterEmpty = allFetchedUsers.length > 0;
 
         return (
-            <div className="h-full flex flex-col items-center justify-center text-center px-6 animate-fade-in">
+            <div className="h-full flex flex-col items-center justify-center text-center px-6 animate-fade-in relative z-10 pb-20">
                 <FilterModal
                     isOpen={showFilters}
                     onClose={() => setShowFilters(false)}
@@ -733,9 +881,19 @@ export const Home: React.FC = () => {
                         ? "We couldn't find anyone matching your specific criteria. Try widening your search."
                         : "You're one of the first ones here! Check back later as more athletes join."}
                 </p>
-                <GlassButton onClick={() => setShowFilters(true)} variant="secondary" className="min-w-[200px]">
-                    Adjust Filters
-                </GlassButton>
+
+                <div className="flex flex-col gap-4 w-full max-w-[220px]">
+                    <GlassButton onClick={() => setShowFilters(true)} variant="secondary" className="w-full">
+                        Adjust Filters
+                    </GlassButton>
+
+                    <button
+                        onClick={() => logout()}
+                        className={`text-xs font-bold uppercase tracking-widest py-3 rounded-xl transition-colors ${isLight ? 'text-slate-400 hover:text-red-500 hover:bg-slate-100' : 'text-white/30 hover:text-red-400 hover:bg-white/5'}`}
+                    >
+                        Sign Out
+                    </button>
+                </div>
             </div>
         );
     }
@@ -786,6 +944,25 @@ export const Home: React.FC = () => {
                             </button>
                         )}
 
+                        {/* Boost Button */}
+                        <button
+                            onClick={() => isBoostActive ? null : setShowBoostModal(true)}
+                            className={`h-10 rounded-full flex items-center justify-center border transition-all shadow-lg active:scale-95 ${isBoostActive
+                                ? 'w-auto px-4 gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 border-purple-400/50 text-white shadow-purple-500/50'
+                                : `w-10 border transition ${isLight ? 'bg-white/60 text-purple-500 border-white hover:bg-white' : 'bg-white/5 border-white/10 text-purple-400 hover:bg-white/10'}`
+                                } ${isBoostActive ? 'animate-pulse-slow' : ''}`}
+                        >
+                            {isBoostActive ? (
+                                <>
+                                    <span className="text-xs font-bold font-mono relative z-10">{formatTime(boostTimeLeft)}</span>
+                                    <Rocket size={16} className="relative z-10" />
+                                    <span className="absolute inset-0 rounded-full animate-ping bg-purple-500 opacity-20" />
+                                </>
+                            ) : (
+                                <Rocket size={18} />
+                            )}
+                        </button>
+
                         {/* Filter Button - Opens Modal, Does NOT Navigate */}
                         <button onClick={() => setShowFilters(true)} className={`w-10 h-10 rounded-[24px] flex items-center justify-center backdrop-blur-xl border transition shadow-lg active:scale-95 ${isLight ? 'bg-white/60 text-slate-900 border-white shadow-black/5 hover:bg-white' : 'bg-white/[0.05] text-white border-white/10 hover:bg-white/10'}`}>
                             <SlidersHorizontal size={18} strokeWidth={1.5} />
@@ -794,7 +971,7 @@ export const Home: React.FC = () => {
                 </div>
             </div>
 
-            {/* Match Overlay - REDESIGNED for SportPulse Liquid Glass */}
+            {/* Match Overlay - REDESIGNED for bind Liquid Glass */}
             {matchOverlay.show && matchOverlay.user && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center animate-fade-in">
                     {/* Liquid Atmosphere Background */}
@@ -922,6 +1099,76 @@ export const Home: React.FC = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Boost Modal */}
+            {showBoostModal && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center px-6 animate-fade-in">
+                    <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowBoostModal(false)} />
+                    <div className="relative w-full max-w-md animate-scale-in">
+                        {/* Liquid Atmosphere */}
+                        <div className="absolute inset-0 -z-10 overflow-hidden rounded-[32px]">
+                            <div className="absolute top-0 right-0 w-[200px] h-[200px] bg-purple-500/40 rounded-full blur-[80px] animate-pulse-slow" />
+                            <div className="absolute bottom-0 left-0 w-[200px] h-[200px] bg-fuchsia-500/40 rounded-full blur-[80px] animate-pulse-slow delay-1000" />
+                        </div>
+
+                        <GlassCard className={`p-8 relative ${isLight ? 'bg-white/95' : 'bg-black/80'} border-purple-500/30`}>
+                            <button
+                                onClick={() => setShowBoostModal(false)}
+                                className={`absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center transition ${isLight ? 'hover:bg-slate-100 text-slate-600' : 'hover:bg-white/10 text-white/60 hover:text-white'}`}
+                            >
+                                <X size={18} />
+                            </button>
+
+                            <div className="flex flex-col items-center text-center">
+                                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center mb-6 shadow-xl shadow-purple-500/50">
+                                    <Rocket size={40} className="text-white" />
+                                </div>
+
+                                <h2 className={`text-2xl font-bold mb-3 ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                                    Boost Your Profile
+                                </h2>
+                                <p className={`text-sm mb-8 leading-relaxed ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
+                                    Get 10x more visibility for 5 minutes. Your profile will be shown to more athletes in your area.
+                                </p>
+
+                                <div className={`w-full p-4 rounded-2xl mb-6 ${isLight ? 'bg-purple-50 border border-purple-200' : 'bg-purple-500/10 border border-purple-500/30'}`}>
+                                    <div className="flex items-center justify-center gap-2 mb-2">
+                                        <Zap size={20} className="text-purple-500" fill="currentColor" />
+                                        <span className={`font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>Premium Feature</span>
+                                    </div>
+                                    <p className={`text-xs ${isLight ? 'text-slate-600' : 'text-white/60'}`}>
+                                        Available for Pro members only
+                                    </p>
+                                </div>
+
+                                <GlassButton
+                                    onClick={handleActivateBoost}
+                                    className="w-full h-14 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0 shadow-xl shadow-purple-500/30 hover:shadow-purple-500/50 mb-3"
+                                >
+                                    {currentUser?.isPremium ? 'Activate Boost' : 'Upgrade to Pro'}
+                                    <Rocket size={20} className="ml-2" />
+                                </GlassButton>
+
+                                {!currentUser?.isPremium && (
+                                    <button
+                                        onClick={() => setShowBoostModal(false)}
+                                        className={`text-xs uppercase tracking-widest font-bold transition ${isLight ? 'text-slate-500 hover:text-slate-700' : 'text-white/50 hover:text-white'}`}
+                                    >
+                                        Maybe Later
+                                    </button>
+                                )}
+                            </div>
+                        </GlassCard>
+                    </div>
+                </div>
+            )}
+
+            {/* Tutorial Overlay */}
+            <TutorialOverlay
+                isActive={showTutorial}
+                steps={TUTORIAL_STEPS}
+                onComplete={handleTutorialComplete}
+            />
         </div>
     );
 };

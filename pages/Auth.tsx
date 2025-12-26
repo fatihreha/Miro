@@ -9,6 +9,7 @@ import { notificationService } from '../services/notificationService';
 import { authHelpers } from '../services/supabase';
 import { userService } from '../services/userService';
 import { User } from '../types';
+import { PasswordStrengthMeter } from '../components/ui/PasswordStrengthMeter';
 
 type AuthMethod = 'email' | 'phone';
 type AuthMode = 'login' | 'signup';
@@ -470,6 +471,10 @@ export const Auth: React.FC = () => {
                                             {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                                         </button>
                                     </div>
+                                    {/* Password Strength Meter - Only for Signup */}
+                                    {mode === 'signup' && formData.password && (
+                                        <PasswordStrengthMeter password={formData.password} isLight={false} />
+                                    )}
                                     {/* Forgot Password Link - Only Login Mode */}
                                     {mode === 'login' && (
                                         <div className="flex justify-end pt-1">

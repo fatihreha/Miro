@@ -294,11 +294,34 @@ export const Onboarding: React.FC = () => {
         workoutEnvironment: formData.workoutEnvironment
       };
 
-      // 5. Save to Supabase Database
-      try {
-        await userService.createProfile(finalUser);
-      } catch (dbError) {
-        console.error('Failed to save user to database:', dbError);
+      // 5. Save to Supabase Database with retry
+      let profileSaved = false;
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      while (!profileSaved && retryCount < maxRetries) {
+        try {
+          await userService.createProfile(finalUser);
+          profileSaved = true;
+        } catch (dbError) {
+          retryCount++;
+          console.error(`Failed to save user to database (attempt ${retryCount}/${maxRetries}):`, dbError);
+
+          if (retryCount < maxRetries) {
+            // Wait before retry (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
+          }
+        }
+      }
+
+      // If profile save failed after all retries, show error and allow manual retry
+      if (!profileSaved) {
+        setIsCompleted(false);
+        hapticFeedback.error();
+        notificationService.showNotification("Profile Save Failed", {
+          body: "Could not save your profile. Please check your connection and try again."
+        });
+        return;
       }
 
       // 6. Login (Updates Context)
@@ -312,7 +335,11 @@ export const Onboarding: React.FC = () => {
 
     } catch (error) {
       console.error("Setup failed", error);
-      navigate('/');
+      setIsCompleted(false);
+      hapticFeedback.error();
+      notificationService.showNotification("Setup Failed", {
+        body: "Something went wrong. Please try again."
+      });
     }
   };
 
@@ -622,8 +649,8 @@ export const Onboarding: React.FC = () => {
                         setFormData({ ...formData, gender: g as any });
                       }}
                       className={`p-5 cursor-pointer border transition-all duration-300 hover:scale-[1.02] active:scale-95 ${isSelected
-                          ? (isLight ? 'border-slate-900 bg-slate-100 shadow-lg' : 'border-neon-blue bg-neon-blue/10 shadow-[0_0_30px_rgba(0,242,255,0.1)]')
-                          : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
+                        ? (isLight ? 'border-slate-900 bg-slate-100 shadow-lg' : 'border-neon-blue bg-neon-blue/10 shadow-[0_0_30px_rgba(0,242,255,0.1)]')
+                        : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
                         }`}
                     >
                       <div className="flex items-center justify-between">
@@ -724,8 +751,8 @@ export const Onboarding: React.FC = () => {
                 onClick={handleGetLocation}
                 disabled={isGettingLocation}
                 className={`w-full p-4 rounded-2xl flex items-center justify-center gap-2 transition-all ${isGettingLocation
-                    ? 'bg-neon-blue/20 cursor-wait'
-                    : 'bg-neon-blue hover:bg-neon-blue/80 active:scale-95'
+                  ? 'bg-neon-blue/20 cursor-wait'
+                  : 'bg-neon-blue hover:bg-neon-blue/80 active:scale-95'
                   }`}
               >
                 {isGettingLocation ? (
@@ -784,8 +811,8 @@ export const Onboarding: React.FC = () => {
                           onClick={() => fileInputRef.current?.click()}
                           disabled={isUploadingPhoto}
                           className={`w-full h-full flex flex-col items-center justify-center gap-2 transition-all ${isUploadingPhoto
-                              ? 'cursor-wait opacity-50'
-                              : 'hover:bg-white/10 cursor-pointer'
+                            ? 'cursor-wait opacity-50'
+                            : 'hover:bg-white/10 cursor-pointer'
                             }`}
                         >
                           {isUploadingPhoto && index === (formData.photos?.length || 0) ? (
@@ -854,8 +881,8 @@ export const Onboarding: React.FC = () => {
                         setFormData({ ...formData, goal: goal.value });
                       }}
                       className={`p-5 cursor-pointer border transition-all duration-300 hover:scale-[1.02] active:scale-95 ${isSelected
-                          ? (isLight ? 'border-slate-900 bg-slate-100 shadow-lg' : 'border-neon-blue bg-neon-blue/10 shadow-[0_0_30px_rgba(0,242,255,0.1)]')
-                          : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
+                        ? (isLight ? 'border-slate-900 bg-slate-100 shadow-lg' : 'border-neon-blue bg-neon-blue/10 shadow-[0_0_30px_rgba(0,242,255,0.1)]')
+                        : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
                         }`}
                     >
                       <div className="flex items-center justify-between">
@@ -938,8 +965,8 @@ export const Onboarding: React.FC = () => {
                         setFormData({ ...formData, level: lvl as any });
                       }}
                       className={`p-4 cursor-pointer border transition-all duration-300 hover:scale-[1.01] active:scale-[0.99] relative ${isSelected
-                          ? (isLight ? 'border-slate-900 bg-slate-50 shadow-lg' : 'border-white bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]')
-                          : (isLight ? 'border-transparent bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
+                        ? (isLight ? 'border-slate-900 bg-slate-50 shadow-lg' : 'border-white bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]')
+                        : (isLight ? 'border-transparent bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
                         }`}
                     >
                       {isSelected && <div className={`absolute inset-y-0 left-0 w-1 ${isLight ? 'bg-slate-900' : 'bg-white'}`} />}
@@ -985,8 +1012,8 @@ export const Onboarding: React.FC = () => {
                         toggleEnvironment(env.value);
                       }}
                       className={`p-5 cursor-pointer border transition-all duration-300 hover:scale-[1.02] active:scale-95 aspect-square flex flex-col items-center justify-center gap-3 ${isSelected
-                          ? (isLight ? 'border-brand-lime bg-brand-lime/10 shadow-lg' : 'border-brand-lime bg-brand-lime/10 shadow-[0_0_30px_rgba(214,255,0,0.1)]')
-                          : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
+                        ? (isLight ? 'border-brand-lime bg-brand-lime/10 shadow-lg' : 'border-brand-lime bg-brand-lime/10 shadow-[0_0_30px_rgba(214,255,0,0.1)]')
+                        : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
                         }`}
                     >
                       <Icon size={32} className={isSelected ? 'text-brand-lime' : (isLight ? 'text-slate-400' : 'text-white/40')} />
@@ -1022,8 +1049,8 @@ export const Onboarding: React.FC = () => {
                         setFormData({ ...formData, workoutTimePreference: time as any });
                       }}
                       className={`p-5 cursor-pointer border transition-all duration-300 hover:scale-[1.02] active:scale-95 relative overflow-hidden ${isSelected
-                          ? (isLight ? 'border-slate-900 bg-slate-100 shadow-lg' : 'border-neon-blue bg-neon-blue/10 shadow-[0_0_30px_rgba(0,242,255,0.1)]')
-                          : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
+                        ? (isLight ? 'border-slate-900 bg-slate-100 shadow-lg' : 'border-neon-blue bg-neon-blue/10 shadow-[0_0_30px_rgba(0,242,255,0.1)]')
+                        : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
                         }`}
                     >
                       {isSelected && <div className="absolute top-4 right-4 text-neon-blue animate-pop"><CheckCircle2 size={20} /></div>}
@@ -1077,8 +1104,8 @@ export const Onboarding: React.FC = () => {
                         }
                       }}
                       className={`p-4 cursor-pointer border transition-all duration-300 hover:scale-[1.02] active:scale-95 flex flex-col items-center justify-center gap-2 aspect-square relative ${isSelected
-                          ? (isLight ? 'border-green-500 bg-green-50 shadow-lg' : 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.1)]')
-                          : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
+                        ? (isLight ? 'border-green-500 bg-green-50 shadow-lg' : 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.1)]')
+                        : (isLight ? 'border-slate-100 bg-white hover:bg-slate-50' : 'border-transparent hover:bg-white/5')
                         }`}
                     >
                       <Icon size={28} className={isSelected ? 'text-green-500' : (isLight ? 'text-slate-400' : 'text-white/40')} />
@@ -1203,8 +1230,8 @@ export const Onboarding: React.FC = () => {
                   setFormData({ ...formData, wantsPro: !formData.wantsPro });
                 }}
                 className={`p-4 cursor-pointer border transition-all duration-300 flex items-center gap-3 overflow-hidden relative ${formData.wantsPro
-                    ? 'bg-blue-500/10 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.2)]'
-                    : (isLight ? 'bg-white border-slate-100 hover:bg-slate-50' : 'bg-white/5 border-white/10 hover:bg-white/10')
+                  ? 'bg-blue-500/10 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.2)]'
+                  : (isLight ? 'bg-white border-slate-100 hover:bg-slate-50' : 'bg-white/5 border-white/10 hover:bg-white/10')
                   }`}
               >
                 {formData.wantsPro && <div className="absolute inset-0 bg-blue-500/5 animate-pulse" />}

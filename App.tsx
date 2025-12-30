@@ -47,7 +47,7 @@ const Bookings = lazy(() => import('./pages/Bookings').then(m => ({ default: m.B
 const Events = lazy(() => import('./pages/Events').then(m => ({ default: m.Events })));
 const EventDetail = lazy(() => import('./pages/EventDetail').then(m => ({ default: m.EventDetail })));
 const PhotoGallery = lazy(() => import('./pages/PhotoGallery').then(m => ({ default: m.PhotoGallery })));
-const PhotoManager = lazy(() => import('./pages/PhotoManager').then(m => ({ default: m.PhotoManager })));
+
 const Map = lazy(() => import('./pages/Map').then(m => ({ default: m.Map })));
 const BecomePro = lazy(() => import('./pages/BecomePro').then(m => ({ default: m.BecomePro })));
 const FAQ = lazy(() => import('./pages/FAQ').then(m => ({ default: m.FAQ })));
@@ -96,7 +96,7 @@ const AppRoutes: React.FC = () => {
           <Route path="/events" element={<ProtectedRoute><Events /></ProtectedRoute>} />
           <Route path="/events/:eventId" element={<ProtectedRoute><EventDetail /></ProtectedRoute>} />
           <Route path="/photo-gallery" element={<ProtectedRoute><PhotoGallery /></ProtectedRoute>} />
-          <Route path="/photo-manager" element={<ProtectedRoute><PhotoManager userId="" photos={[]} onPhotosChange={async () => {}} onClose={() => {}} /></ProtectedRoute>} />
+
           <Route path="/trainers" element={<ProtectedRoute><Trainers /></ProtectedRoute>} />
           <Route path="/trainers/:trainerId" element={<ProtectedRoute><TrainerDetail /></ProtectedRoute>} />
           <Route path="/bookings" element={<ProtectedRoute><Bookings /></ProtectedRoute>} />
@@ -112,12 +112,12 @@ const AppRoutes: React.FC = () => {
           {/* Support & Legal Routes */}
           <Route path="/faq" element={<ProtectedRoute><FAQ /></ProtectedRoute>} />
           <Route path="/contact" element={<ProtectedRoute><Contact /></ProtectedRoute>} />
-          <Route path="/privacy" element={<ProtectedRoute><Privacy /></ProtectedRoute>} />
+          <Route path="/privacy" element={<Privacy />} />
           <Route path="/privacy-settings" element={<ProtectedRoute><PrivacySettings /></ProtectedRoute>} />
-          <Route path="/terms" element={<ProtectedRoute><Terms /></ProtectedRoute>} />
+          <Route path="/terms" element={<Terms />} />
           <Route path="/blocked-users" element={<ProtectedRoute><BlockedUsers /></ProtectedRoute>} />
-          <Route path="/legal/privacy-policy" element={<ProtectedRoute><LegalPrivacyPolicy /></ProtectedRoute>} />
-          <Route path="/legal/consent-form" element={<ProtectedRoute><LegalConsentForm /></ProtectedRoute>} />
+          <Route path="/legal/privacy-policy" element={<LegalPrivacyPolicy />} />
+          <Route path="/legal/consent-form" element={<LegalConsentForm />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -142,10 +142,10 @@ const App: React.FC = () => {
       try {
         // Retry failed payment syncs from previous sessions
         await subscriptionService.checkAndRetryFailedSyncs();
-        
+
         // Retry pending messages that failed to send
         await chatService.retryPendingMessages();
-        
+
         console.log('[App] Startup recovery completed');
       } catch (error) {
         console.error('[App] Startup recovery failed:', error);
